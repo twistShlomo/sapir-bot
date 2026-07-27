@@ -1,0 +1,337 @@
+const IMGBB_API_KEY = "f80975e82a556615b17c466496477982";
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (url.pathname.startsWith('/api/')) {
+      // CORS headers
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { headers: corsHeaders() });
+      }
+      const response = await handleAPI(url, request, env);
+      // Add CORS to all API responses
+      const newHeaders = new Headers(response.headers);
+      for (const [k, v] of Object.entries(corsHeaders())) {
+        newHeaders.set(k, v);
+      }
+      return new Response(response.body, { status: response.status, headers: newHeaders });
+    }
+
+    // Static files served automatically by [assets] in wrangler.toml
+    return env.ASSETS.fetch(request);
+  }
+};
+
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+}
+
+async function handleAPI(url, request, env) {
+  const path = url.pathname.replace('/api/', '');
+
+  try {
+    // ========== GET ==========
+    if (request.method === 'GET') {
+
+      // Dashboard - all data
+      if (path === 'dashboard') {
+        const [branches, promos, tips, info] = await Promise.all([
+          env.DB.prepare('SELECT * FROM branches').all(),
+          env.DB.prepare('SELECT * FROM promos').all(),
+          env.DB.prepare("SELECT text FROM content WHERE type='tips' LIMIT 1").first(),
+          env.DB.prepare("SELECT text FROM content WHERE type='info' LIMIT 1").first(),
+        ]);
+
+        const today = new Date(new Date().toDateString());
+
+        return Response.json({
+          branches: branches.results.map(b => ({
+            id: b.id,
+            name: b.name,
+            address: b.address,
+            hours: {
+              sunday: b.sunday,
+              monday: b.monday,
+              tuesday: b.tuesday,
+              wednesday: b.wednesday,
+              thursday: b.thursday,
+              friday: b.friday,
+              saturday: b.saturday,
+            },
+            waze: b.waze,
+            groupLink: b.group_link,
+            notes: b.notes,
+          })),
+          promos: promos.results.map(p => ({
+            id: p.id,
+            title: p.title,
+            image: p.image,
+            description: p.description,
+            expiry: p.expiry,
+            branches: p.branches === 'ALL' ? 'ALL' : JSON.parse(p.branches),
+            isExpired: p.expiry && new Date(p.expiry) < today,
+          })),
+          tips: tips?.text || '',
+          general: info?.text || '',
+        });
+      }
+
+      // Bot: all active promos
+      if (path === 'promos') {
+        const today = new Date().toISOString().split('T')[0];
+        const promos = await env.DB.prepare(
+          'SELECT * FROM promos WHERE expiry >= ? ORDER BY expiry ASC'
+        ).bind(today).all();
+
+        if (promos.results.length === 0) {
+          return Response.json({
+            promos: [{
+              id: 0,
+              title: '',
+              image: 'https://i.ibb.co/placeholder-sapir.jpg',
+              description: 'כרגע אין מבצעים פעילים, אבל בקבוצה הסודית מתעדכנים כל הזמן!',
+              expiry: '',
+              branches: 'ALL',
+            }],
+          });
+        }
+
+        return Response.json({
+          promos: promos.results.map(p => ({
+            id: p.id,
+            title: p.title,
+            image: p.image,
+            description: p.description,
+            expiry: p.expiry,
+            branches: p.branches === 'ALL' ? 'ALL' : JSON.parse(p.branches),
+          })),
+        });
+      }
+
+      // Bot: tips
+      if (path === 'tips') {
+        const tips = await env.DB.prepare("SELECT text FROM content WHERE type='tips' LIMIT 1").first();
+        return Response.json({ tips: (tips?.text || '').split('\n').filter(Boolean) });
+      }
+
+      // Bot: info
+      if (path === 'info') {
+        const info = await env.DB.prepare("SELECT text FROM content WHERE type='info' LIMIT 1").first();
+        return Response.json({ info: (info?.text || '').split('\n').filter(Boolean) });
+      }
+
+      // Bot: all branches list
+      if (path === 'branches') {
+        const branches = await env.DB.prepare('SELECT * FROM branches').all();
+        return Response.json({
+          branches: branches.results.map(b => ({
+            name: b.name,
+            address: b.address,
+            sunday: b.sunday,
+            monday: b.monday,
+            tuesday: b.tuesday,
+            wednesday: b.wednesday,
+            thursday: b.thursday,
+            friday: b.friday,
+            saturday_night: b.saturday,
+            waze_link: b.waze,
+            group_link: b.group_link,
+            notes: b.notes,
+          })),
+        });
+      }
+
+      // Bot: branch info by name
+      if (path.startsWith('branch/')) {
+        const branchName = decodeURIComponent(path.replace('branch/', ''));
+        const branch = await env.DB.prepare('SELECT * FROM branches WHERE name=?').bind(branchName).first();
+        if (!branch) return Response.json({ error: 'Branch not found' }, { status: 404 });
+        return Response.json({
+          message: {
+            name: branch.name,
+            address: branch.address,
+            sunday: branch.sunday,
+            monday: branch.monday,
+            tuesday: branch.tuesday,
+            wednesday: branch.wednesday,
+            thursday: branch.thursday,
+            friday: branch.friday,
+            saturday_night: branch.saturday,
+            waze_link: branch.waze,
+            notes: branch.group_link,
+            info: branch.notes,
+          },
+        });
+      }
+
+      // Bot: best promo for branch
+      if (path.startsWith('promo/')) {
+        const branchName = decodeURIComponent(path.replace('promo/', ''));
+        return await getBestPromo(env, branchName);
+      }
+    }
+
+    // ========== POST ==========
+    if (request.method === 'POST') {
+      const body = await request.json();
+
+      // Add new branch
+      if (path === 'branch/new') {
+        const result = await env.DB.prepare(`
+          INSERT INTO branches (name, address, sunday, monday, tuesday, wednesday,
+              thursday, friday, saturday, waze, group_link, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          body.name, body.address,
+          body.hours.sunday || '', body.hours.monday || '', body.hours.tuesday || '',
+          body.hours.wednesday || '', body.hours.thursday || '', body.hours.friday || '',
+          body.hours.saturday || '', body.waze || '', body.groupLink || '', body.notes || ''
+        ).run();
+
+        return Response.json({ success: true, id: result.meta.last_row_id });
+      }
+
+      // Save branch
+      if (path === 'branch') {
+        await env.DB.prepare(`
+          UPDATE branches
+          SET name=?, address=?, sunday=?, monday=?, tuesday=?, wednesday=?,
+              thursday=?, friday=?, saturday=?, waze=?, group_link=?, notes=?
+          WHERE id=?
+        `).bind(
+          body.name, body.address,
+          body.hours.sunday, body.hours.monday, body.hours.tuesday,
+          body.hours.wednesday, body.hours.thursday, body.hours.friday,
+          body.hours.saturday, body.waze, body.groupLink, body.notes,
+          body.id
+        ).run();
+
+        return Response.json({ success: true });
+      }
+
+      // Save promo (create or update)
+      if (path === 'promo') {
+        let imageUrl = body.image || '';
+
+        // Upload base64 image to ImgBB
+        if (imageUrl.startsWith('data:image')) {
+          imageUrl = await uploadToImgBB(imageUrl, body.fileName);
+        }
+
+        const branchesVal = body.branches === 'ALL' ? 'ALL' : JSON.stringify(body.branches);
+
+        if (body.id) {
+          await env.DB.prepare(`
+            UPDATE promos SET title=?, image=?, description=?, expiry=?, branches=? WHERE id=?
+          `).bind(body.title, imageUrl, body.description, body.expiry, branchesVal, body.id).run();
+        } else {
+          await env.DB.prepare(`
+            INSERT INTO promos (title, image, description, expiry, branches) VALUES (?, ?, ?, ?, ?)
+          `).bind(body.title, imageUrl, body.description, body.expiry, branchesVal).run();
+        }
+
+        return Response.json({ success: true });
+      }
+
+      // Save text content (tips / info)
+      if (path === 'content') {
+        const existing = await env.DB.prepare('SELECT id FROM content WHERE type=?').bind(body.type).first();
+
+        if (existing) {
+          await env.DB.prepare('UPDATE content SET text=? WHERE type=?').bind(body.text, body.type).run();
+        } else {
+          await env.DB.prepare('INSERT INTO content (type, text) VALUES (?, ?)').bind(body.type, body.text).run();
+        }
+
+        return Response.json({ success: true });
+      }
+    }
+
+    // ========== DELETE ==========
+    if (request.method === 'DELETE') {
+      // Delete promo
+      if (path.startsWith('promo/')) {
+        const id = parseInt(path.replace('promo/', ''));
+        await env.DB.prepare('DELETE FROM promos WHERE id=?').bind(id).run();
+        return Response.json({ success: true });
+      }
+
+      // Delete branch
+      if (path.startsWith('branch/')) {
+        const id = parseInt(path.replace('branch/', ''));
+        await env.DB.prepare('DELETE FROM branches WHERE id=?').bind(id).run();
+        return Response.json({ success: true });
+      }
+    }
+
+    return Response.json({ error: 'Not found' }, { status: 404 });
+
+  } catch (e) {
+    return Response.json({ error: e.message }, { status: 500 });
+  }
+}
+
+async function getBestPromo(env, branchName) {
+  const today = new Date().toISOString().split('T')[0];
+  const promos = await env.DB.prepare(
+    'SELECT * FROM promos WHERE expiry >= ? ORDER BY expiry ASC'
+  ).bind(today).all();
+
+  let specific = null;
+  let global = null;
+
+  for (const p of promos.results) {
+    if (p.branches === 'ALL') {
+      if (!global) global = p;
+    } else {
+      try {
+        const list = JSON.parse(p.branches);
+        if (Array.isArray(list) && list.includes(branchName) && !specific) {
+          specific = p;
+        }
+      } catch (e) {}
+    }
+  }
+
+  const winner = specific || global;
+  if (winner) {
+    return Response.json({
+      title: winner.title,
+      image: winner.image,
+      description: winner.description,
+      expiry: winner.expiry,
+      branches: winner.branches === 'ALL' ? 'ALL' : JSON.parse(winner.branches),
+    });
+  }
+
+  return Response.json({
+    title: '',
+    image: 'https://i.ibb.co/placeholder-sapir.jpg',
+    description: 'כרגע אין מבצעים ספציפיים בסניף זה, אבל בקבוצה הסודית מתעדכנים כל הזמן!',
+    expiry: '',
+    branches: 'ALL',
+  });
+}
+
+async function uploadToImgBB(base64String, filename) {
+  const cleanBase64 = base64String.split(',')[1] || base64String;
+
+  const formData = new FormData();
+  formData.append('key', IMGBB_API_KEY);
+  formData.append('image', cleanBase64);
+  formData.append('name', filename || 'promo_image');
+
+  const response = await fetch('https://api.imgbb.com/1/upload', {
+    method: 'POST',
+    body: formData,
+  });
+
+  const json = await response.json();
+  if (json.data && json.data.url) return json.data.url;
+  throw new Error('ImgBB upload failed');
+}

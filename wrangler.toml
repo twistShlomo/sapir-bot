@@ -1,0 +1,12 @@
+name = "sapir-bot"
+main = "src/worker.js"
+compatibility_date = "2024-12-01"
+account_id = "0261050b3c69414fe554ea2adb74591d"
+
+[assets]
+directory = "./public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sapir-db"
+database_id = "9c95af3a-7011-4f09-a855-a66ca5d8f74c"
