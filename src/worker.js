@@ -66,6 +66,8 @@ async function handleAPI(url, request, env) {
             waze: b.waze,
             groupLink: b.group_link,
             notes: b.notes,
+            region: b.region || '',
+            adminNotes: b.admin_notes || '',
           })),
           promos: promos.results.map(p => ({
             id: p.id,
@@ -184,13 +186,14 @@ async function handleAPI(url, request, env) {
       if (path === 'branch/new') {
         const result = await env.DB.prepare(`
           INSERT INTO branches (name, address, sunday, monday, tuesday, wednesday,
-              thursday, friday, saturday, waze, group_link, notes)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              thursday, friday, saturday, waze, group_link, notes, region, admin_notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).bind(
           body.name, body.address,
           body.hours.sunday || '', body.hours.monday || '', body.hours.tuesday || '',
           body.hours.wednesday || '', body.hours.thursday || '', body.hours.friday || '',
-          body.hours.saturday || '', body.waze || '', body.groupLink || '', body.notes || ''
+          body.hours.saturday || '', body.waze || '', body.groupLink || '', body.notes || '',
+          body.region || '', body.adminNotes || ''
         ).run();
 
         return Response.json({ success: true, id: result.meta.last_row_id });
@@ -201,13 +204,15 @@ async function handleAPI(url, request, env) {
         await env.DB.prepare(`
           UPDATE branches
           SET name=?, address=?, sunday=?, monday=?, tuesday=?, wednesday=?,
-              thursday=?, friday=?, saturday=?, waze=?, group_link=?, notes=?
+              thursday=?, friday=?, saturday=?, waze=?, group_link=?, notes=?,
+              region=?, admin_notes=?
           WHERE id=?
         `).bind(
           body.name, body.address,
           body.hours.sunday, body.hours.monday, body.hours.tuesday,
           body.hours.wednesday, body.hours.thursday, body.hours.friday,
           body.hours.saturday, body.waze, body.groupLink, body.notes,
+          body.region || '', body.adminNotes || '',
           body.id
         ).run();
 

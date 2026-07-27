@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- Sapir Bot v3.2 -->
 <html lang="he" dir="rtl">
   <head>
     <meta charset="UTF-8" />
@@ -366,6 +367,46 @@
                     onChange={(e) => handleChange("notes", e.target.value)}
                     className="w-full border rounded p-2 h-20 resize-none focus:ring-1 focus:ring-blue-500 outline-none"
                   ></textarea>
+                </div>
+
+                {/* אזור והערות ניהול */}
+                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                  <h4 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
+                    <i className="ph ph-gear"></i> הגדרות ניהול (לא יופיע בבוט)
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-gray-500">
+                        אזור בארץ
+                      </label>
+                      <select
+                        value={data.region || ''}
+                        onChange={(e) => handleChange("region", e.target.value)}
+                        className="w-full border rounded p-2 bg-white"
+                      >
+                        <option value="">בחר אזור...</option>
+                        <option value="צפון">צפון</option>
+                        <option value="חיפה והקריות">חיפה והקריות</option>
+                        <option value="שרון">שרון</option>
+                        <option value="מרכז">מרכז</option>
+                        <option value="תל אביב">תל אביב</option>
+                        <option value="ירושלים">ירושלים</option>
+                        <option value="שפלה">שפלה</option>
+                        <option value="דרום">דרום</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-gray-500">
+                        הערות ניהול פנימיות
+                      </label>
+                      <textarea
+                        value={data.adminNotes || ''}
+                        onChange={(e) => handleChange("adminNotes", e.target.value)}
+                        placeholder="הערות לצוות הניהול בלבד..."
+                        className="w-full border rounded p-2 h-16 resize-none focus:ring-1 focus:ring-gray-400 outline-none text-sm"
+                      ></textarea>
+                    </div>
+                  </div>
                 </div>
 
                 <button
@@ -871,6 +912,8 @@
         const [editingBranchId, setEditingBranchId] = useState(null);
         const [isAddingNew, setIsAddingNew] = useState(false);
         const [branchSearch, setBranchSearch] = useState("");
+        const [filterNoGroup, setFilterNoGroup] = useState(false);
+        const [filterNoWaze, setFilterNoWaze] = useState(false);
 
         const loadData = async () => {
           setLoading(true);
@@ -976,7 +1019,7 @@
                 </a>
               </nav>
               <div className="p-4 border-t text-center text-xs text-gray-400">
-                V3.0 Cloudflare D1
+                V3.2
               </div>
             </aside>
 
@@ -1002,6 +1045,8 @@
                                 saturday: "",
                               },
                               notes: "",
+                              region: "",
+                              adminNotes: "",
                             }
                           : activeBranch
                       }
@@ -1057,12 +1102,39 @@
                           </button>
                         </div>
                       </div>
+
+                      {/* פילטרים */}
+                      <div className="flex gap-4 mb-6 flex-wrap">
+                        <label className="flex items-center gap-2 cursor-pointer text-sm bg-white px-3 py-2 rounded-lg border hover:bg-gray-50 smooth-transition">
+                          <input
+                            type="checkbox"
+                            checked={filterNoGroup}
+                            onChange={(e) => setFilterNoGroup(e.target.checked)}
+                            className="text-blue-600 rounded"
+                          />
+                          <i className="ph ph-whatsapp-logo text-gray-500"></i>
+                          <span>ללא קישור לקבוצה</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer text-sm bg-white px-3 py-2 rounded-lg border hover:bg-gray-50 smooth-transition">
+                          <input
+                            type="checkbox"
+                            checked={filterNoWaze}
+                            onChange={(e) => setFilterNoWaze(e.target.checked)}
+                            className="text-blue-600 rounded"
+                          />
+                          <i className="ph ph-navigation-arrow text-gray-500"></i>
+                          <span>ללא קישור ל-Waze</span>
+                        </label>
+                      </div>
+
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                         {data.branches
                           .filter(
                             (b) =>
-                              b.name.includes(branchSearch) ||
-                              b.address.includes(branchSearch),
+                              (b.name.includes(branchSearch) ||
+                              b.address.includes(branchSearch)) &&
+                              (!filterNoGroup || !b.groupLink) &&
+                              (!filterNoWaze || !b.waze),
                           )
                           .map((b, index) => (
                             <div
@@ -1083,14 +1155,23 @@
                                 <i className="ph ph-map-pin mt-1"></i>{" "}
                                 {b.address}
                               </div>
-                              <div className="flex gap-2 mt-auto pt-4 border-t border-gray-100">
+                              <div className="flex gap-2 mt-auto pt-4 border-t border-gray-100 flex-wrap">
                                 {b.groupLink ? (
-                                  <span className="text-blue-600 bg-blue-50 px-2 py-1 rounded text-xs font-bold">
-                                    יש קבוצה
+                                  <span className="text-blue-600 bg-blue-50 px-2 py-1 rounded text-xs font-bold flex items-center gap-1">
+                                    <i className="ph ph-whatsapp-logo"></i> יש קבוצה
                                   </span>
                                 ) : (
-                                  <span className="text-gray-400 bg-gray-50 px-2 py-1 rounded text-xs">
-                                    אין קבוצה
+                                  <span className="text-gray-400 bg-gray-50 px-2 py-1 rounded text-xs flex items-center gap-1">
+                                    <i className="ph ph-whatsapp-logo"></i> אין קבוצה
+                                  </span>
+                                )}
+                                {b.waze ? (
+                                  <span className="text-cyan-600 bg-cyan-50 px-2 py-1 rounded text-xs font-bold flex items-center gap-1">
+                                    <i className="ph ph-navigation-arrow"></i> Waze
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400 bg-gray-50 px-2 py-1 rounded text-xs flex items-center gap-1">
+                                    <i className="ph ph-navigation-arrow"></i> אין Waze
                                   </span>
                                 )}
                               </div>
