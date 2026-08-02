@@ -144,8 +144,45 @@ async function handleAPI(url, request, env) {
             waze_link: b.waze,
             group_link: b.group_link,
             notes: b.notes,
+            region: b.region || '',
           })),
         });
+      }
+
+      // Bot: all regions with their branches
+      if (path === 'regions') {
+        const branches = await env.DB.prepare('SELECT * FROM branches').all();
+
+        // Group branches by region
+        const regionMap = {};
+        for (const b of branches.results) {
+          const region = b.region || 'ללא אזור';
+          if (!regionMap[region]) {
+            regionMap[region] = [];
+          }
+          regionMap[region].push({
+            name: b.name,
+            address: b.address,
+            sunday: b.sunday,
+            monday: b.monday,
+            tuesday: b.tuesday,
+            wednesday: b.wednesday,
+            thursday: b.thursday,
+            friday: b.friday,
+            saturday_night: b.saturday,
+            waze_link: b.waze,
+            group_link: b.group_link,
+            notes: b.notes,
+          });
+        }
+
+        // Convert to array format
+        const regions = Object.entries(regionMap).map(([name, branches]) => ({
+          name,
+          branches,
+        }));
+
+        return Response.json({ regions });
       }
 
       // Bot: branch info by name
