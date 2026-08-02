@@ -204,6 +204,7 @@ async function handleAPI(url, request, env) {
             waze_link: branch.waze,
             notes: branch.group_link,
             info: branch.notes,
+            region: branch.region || '',
           },
         });
       }
