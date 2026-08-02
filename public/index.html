@@ -199,6 +199,7 @@
         onCancel,
         isNew = false,
         onDelete,
+        regions = [],
       }) => {
         const [data, setData] = useState(branch);
         const [saving, setSaving] = useState(false);
@@ -385,14 +386,9 @@
                         className="w-full border rounded p-2 bg-white"
                       >
                         <option value="">בחר אזור...</option>
-                        <option value="צפון">צפון</option>
-                        <option value="חיפה והקריות">חיפה והקריות</option>
-                        <option value="שרון">שרון</option>
-                        <option value="מרכז">מרכז</option>
-                        <option value="תל אביב">תל אביב</option>
-                        <option value="ירושלים">ירושלים</option>
-                        <option value="שפלה">שפלה</option>
-                        <option value="דרום">דרום</option>
+                        {regions.map((region) => (
+                          <option key={region} value={region}>{region}</option>
+                        ))}
                       </select>
                     </div>
                     <div>
@@ -914,12 +910,17 @@
         const [branchSearch, setBranchSearch] = useState("");
         const [filterNoGroup, setFilterNoGroup] = useState(false);
         const [filterNoWaze, setFilterNoWaze] = useState(false);
+        const [regionList, setRegionList] = useState([]);
 
         const loadData = async () => {
           setLoading(true);
           try {
-            const result = await api.get("dashboard");
+            const [result, regionsResult] = await Promise.all([
+              api.get("dashboard"),
+              api.get("region-list"),
+            ]);
             setData(result);
+            setRegionList(regionsResult.regions || []);
           } catch (e) {
             alert("שגיאה בטעינת נתונים");
           } finally {
@@ -1051,6 +1052,7 @@
                           : activeBranch
                       }
                       isNew={isAddingNew}
+                      regions={regionList}
                       onCancel={() => {
                         setEditingBranchId(null);
                         setIsAddingNew(false);

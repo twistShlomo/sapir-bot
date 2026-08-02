@@ -149,6 +149,14 @@ async function handleAPI(url, request, env) {
         });
       }
 
+      // Get unique region names for dropdown
+      if (path === 'region-list') {
+        const branches = await env.DB.prepare('SELECT DISTINCT region FROM branches WHERE region IS NOT NULL AND region != "" ORDER BY region').all();
+        return Response.json({
+          regions: branches.results.map(b => b.region),
+        });
+      }
+
       // Bot: all regions with their branches
       if (path === 'regions') {
         const branches = await env.DB.prepare('SELECT * FROM branches').all();
