@@ -1159,27 +1159,30 @@
                                   נקה הכל
                                 </button>
                               </div>
-                              {regionList.map((region) => (
-                                <label
-                                  key={region.name}
-                                  className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={filterRegions.includes(region.name)}
-                                    onChange={(e) => {
-                                      if (e.target.checked) {
-                                        setFilterRegions([...filterRegions, region.name]);
-                                      } else {
-                                        setFilterRegions(filterRegions.filter(r => r !== region.name));
-                                      }
-                                    }}
-                                    className="text-purple-600 rounded"
-                                  />
-                                  <span className="text-sm">{region.name}</span>
-                                  <span className="text-xs text-gray-400 mr-auto">({region.count})</span>
-                                </label>
-                              ))}
+                              {regionList.map((regionName) => {
+                                const count = data.branches.filter(b => b.region === regionName).length;
+                                return (
+                                  <label
+                                    key={regionName}
+                                    className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={filterRegions.includes(regionName)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setFilterRegions([...filterRegions, regionName]);
+                                        } else {
+                                          setFilterRegions(filterRegions.filter(r => r !== regionName));
+                                        }
+                                      }}
+                                      className="text-purple-600 rounded"
+                                    />
+                                    <span className="text-sm">{regionName}</span>
+                                    <span className="text-xs text-gray-400 mr-auto">({count})</span>
+                                  </label>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
