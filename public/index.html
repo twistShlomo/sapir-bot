@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Sapir Bot v3.3 -->
+<!-- Sapir Bot v3.4 -->
 <html lang="he" dir="rtl">
   <head>
     <meta charset="UTF-8" />
@@ -80,6 +80,34 @@
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
       }
 
+      /* Mobile sidebar */
+      @media (max-width: 768px) {
+        .sidebar-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.5);
+          z-index: 40;
+          animation: fadeIn 0.2s ease-out;
+        }
+        .sidebar-mobile {
+          position: fixed;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          width: 280px;
+          z-index: 50;
+          animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+          from {
+            transform: translateX(100%);
+          }
+          to {
+            transform: translateX(0);
+          }
+        }
+      }
+
       /* רקע וואטסאפ לתצוגה מקדימה */
       .whatsapp-bg {
         background-color: #e5ddd5;
@@ -104,13 +132,229 @@
         margin-top: 0;
         margin-right: -1px;
       }
+
+      /* Toast notifications */
+      .toast-container {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 100;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-width: 90vw;
+      }
+      .toast {
+        padding: 12px 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        animation: toastIn 0.3s ease-out;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .toast-success {
+        background: #10b981;
+        color: white;
+      }
+      .toast-error {
+        background: #ef4444;
+        color: white;
+      }
+      .toast-info {
+        background: #3b82f6;
+        color: white;
+      }
+      .toast-exit {
+        animation: toastOut 0.3s ease-in forwards;
+      }
+      @keyframes toastIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes toastOut {
+        from { opacity: 1; transform: translateY(0); }
+        to { opacity: 0; transform: translateY(20px); }
+      }
+
+      /* Skeleton loading */
+      .skeleton {
+        background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+        background-size: 200% 100%;
+        animation: skeleton-loading 1.5s infinite;
+        border-radius: 8px;
+      }
+      @keyframes skeleton-loading {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+      }
+
+      /* Pull to refresh */
+      .pull-indicator {
+        position: fixed;
+        top: 60px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 25;
+        background: white;
+        padding: 8px 16px;
+        border-radius: 20px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        font-size: 12px;
+        color: #666;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      /* Auto-save indicator */
+      .autosave-indicator {
+        position: fixed;
+        bottom: 80px;
+        left: 20px;
+        background: #f59e0b;
+        color: white;
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        animation: fadeIn 0.3s ease-out;
+        z-index: 50;
+      }
     </style>
   </head>
   <body>
     <div id="root"></div>
 
     <script type="text/babel">
-      const { useState, useEffect } = React;
+      const { useState, useEffect, useRef, useCallback } = React;
+
+      // --- Toast System ---
+      const ToastContext = React.createContext();
+
+      const ToastProvider = ({ children }) => {
+        const [toasts, setToasts] = useState([]);
+
+        const addToast = useCallback((message, type = 'info') => {
+          const id = Date.now();
+          setToasts(prev => [...prev, { id, message, type }]);
+          setTimeout(() => {
+            setToasts(prev => prev.map(t =>
+              t.id === id ? { ...t, exiting: true } : t
+            ));
+            setTimeout(() => {
+              setToasts(prev => prev.filter(t => t.id !== id));
+            }, 300);
+          }, 3000);
+        }, []);
+
+        return (
+          <ToastContext.Provider value={{ addToast }}>
+            {children}
+            <div className="toast-container">
+              {toasts.map(toast => (
+                <div
+                  key={toast.id}
+                  className={`toast toast-${toast.type} ${toast.exiting ? 'toast-exit' : ''}`}
+                >
+                  <i className={`ph ${
+                    toast.type === 'success' ? 'ph-check-circle' :
+                    toast.type === 'error' ? 'ph-x-circle' : 'ph-info'
+                  }`}></i>
+                  {toast.message}
+                </div>
+              ))}
+            </div>
+          </ToastContext.Provider>
+        );
+      };
+
+      const useToast = () => React.useContext(ToastContext);
+
+      // --- Debounce Hook ---
+      const useDebounce = (value, delay) => {
+        const [debouncedValue, setDebouncedValue] = useState(value);
+
+        useEffect(() => {
+          const handler = setTimeout(() => {
+            setDebouncedValue(value);
+          }, delay);
+
+          return () => clearTimeout(handler);
+        }, [value, delay]);
+
+        return debouncedValue;
+      };
+
+      // --- Auto-save Hook ---
+      const useAutoSave = (key, data, enabled = true) => {
+        const [hasDraft, setHasDraft] = useState(false);
+        const timeoutRef = useRef(null);
+
+        useEffect(() => {
+          if (!enabled) return;
+
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+          }
+
+          timeoutRef.current = setTimeout(() => {
+            if (data && Object.keys(data).some(k => data[k])) {
+              localStorage.setItem(`draft_${key}`, JSON.stringify(data));
+              setHasDraft(true);
+            }
+          }, 2000);
+
+          return () => {
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+            }
+          };
+        }, [data, key, enabled]);
+
+        const clearDraft = useCallback(() => {
+          localStorage.removeItem(`draft_${key}`);
+          setHasDraft(false);
+        }, [key]);
+
+        const loadDraft = useCallback(() => {
+          const saved = localStorage.getItem(`draft_${key}`);
+          return saved ? JSON.parse(saved) : null;
+        }, [key]);
+
+        return { hasDraft, clearDraft, loadDraft };
+      };
+
+      // --- Skeleton Components ---
+      const BranchCardSkeleton = () => (
+        <div className="bg-white p-5 rounded-2xl shadow-sm border">
+          <div className="flex justify-between items-start mb-3">
+            <div className="skeleton h-6 w-32 mb-2"></div>
+            <div className="skeleton h-8 w-8 rounded-full"></div>
+          </div>
+          <div className="skeleton h-4 w-48 mb-4"></div>
+          <div className="flex gap-2 pt-4 border-t border-gray-100">
+            <div className="skeleton h-6 w-20"></div>
+            <div className="skeleton h-6 w-16"></div>
+          </div>
+        </div>
+      );
+
+      const PromoCardSkeleton = () => (
+        <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+          <div className="skeleton h-48 w-full rounded-none"></div>
+          <div className="p-5">
+            <div className="skeleton h-6 w-3/4 mb-2"></div>
+            <div className="skeleton h-4 w-full mb-4"></div>
+            <div className="skeleton h-8 w-full rounded-lg"></div>
+          </div>
+        </div>
+      );
 
       // --- API helper ---
       const api = {
@@ -139,7 +383,7 @@
           ":" +
           String(new Date().getMinutes()).padStart(2, "0");
         return (
-          <div className="w-[280px] h-[520px] bg-gray-800 rounded-[30px] border-8 border-gray-800 shadow-xl overflow-hidden flex flex-col mx-auto sticky top-4">
+          <div className="w-[240px] md:w-[280px] h-[440px] md:h-[520px] bg-gray-800 rounded-[30px] border-8 border-gray-800 shadow-xl overflow-hidden flex flex-col mx-auto sticky top-4">
             <div className="bg-[#075e54] text-white p-3 flex items-center gap-2 shadow-md z-10">
               <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
                 <i className="ph ph-robot"></i>
@@ -203,6 +447,24 @@
       }) => {
         const [data, setData] = useState(branch);
         const [saving, setSaving] = useState(false);
+        const { addToast } = useToast();
+        const { hasDraft, clearDraft, loadDraft } = useAutoSave(
+          `branch_${isNew ? 'new' : branch.id}`,
+          data,
+          true
+        );
+
+        // Load draft on mount if exists
+        useEffect(() => {
+          const draft = loadDraft();
+          if (draft && isNew) {
+            if (confirm('נמצאה טיוטה שמורה. האם לטעון אותה?')) {
+              setData(draft);
+            } else {
+              clearDraft();
+            }
+          }
+        }, []);
 
         const handleChange = (field, value) => {
           if (field.includes(".")) {
@@ -218,23 +480,27 @@
           try {
             if (isNew) {
               const res = await api.post("branch/new", data);
+              clearDraft();
+              addToast('הסניף נוסף בהצלחה!', 'success');
               onSave({ ...data, id: res.id });
             } else {
               await api.post("branch", data);
+              clearDraft();
+              addToast('הסניף עודכן בהצלחה!', 'success');
               onSave(data);
             }
           } catch (e) {
-            alert("שגיאה בשמירה");
+            addToast('שגיאה בשמירה', 'error');
           } finally {
             setSaving(false);
           }
         };
 
         return (
-          <div className="flex flex-col lg:flex-row gap-6 h-full pb-10 animate-fadeIn">
-            <div className="flex-1 bg-white p-6 rounded-xl shadow-sm border overflow-y-auto">
-              <div className="flex justify-between items-center mb-6 border-b pb-4">
-                <h3 className="text-xl font-bold text-gray-800">
+          <div className="flex flex-col lg:flex-row gap-4 md:gap-6 h-full pb-10 animate-fadeIn">
+            <div className="flex-1 bg-white p-4 md:p-6 rounded-xl shadow-sm border overflow-y-auto">
+              <div className="flex justify-between items-center mb-4 md:mb-6 border-b pb-4">
+                <h3 className="text-lg md:text-xl font-bold text-gray-800">
                   {isNew ? "הוספת סניף חדש" : "עריכת פרטי סניף"}
                 </h3>
                 <div className="flex gap-2">
@@ -408,7 +674,7 @@
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow font-bold flex justify-center items-center gap-2"
+                  className="w-full py-4 md:py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow font-bold flex justify-center items-center gap-2 text-lg md:text-base"
                 >
                   {saving ? <div className="loader"></div> : "שמור ועדכן בוט"}
                 </button>
@@ -545,6 +811,7 @@
       const PromosManager = ({ promos, branches, onRefresh }) => {
         const [isModalOpen, setIsModalOpen] = useState(false);
         const [loading, setLoading] = useState(false);
+        const { addToast } = useToast();
         const [newPromo, setNewPromo] = useState({
           id: null,
           title: "",
@@ -561,7 +828,8 @@
             !newPromo.expiry ||
             (!newPromo.image && !newPromo.id)
           ) {
-            return alert("אנא מלא את שדות החובה המסומנים בכוכבית");
+            addToast('אנא מלא את שדות החובה המסומנים בכוכבית', 'error');
+            return;
           }
 
           setLoading(true);
@@ -570,6 +838,7 @@
             if (res.success) {
               setIsModalOpen(false);
               onRefresh();
+              addToast(newPromo.id ? 'המבצע עודכן בהצלחה!' : 'המבצע נוסף בהצלחה!', 'success');
               setNewPromo({
                 id: null,
                 title: "",
@@ -580,10 +849,10 @@
                 fileName: "",
               });
             } else {
-              alert("שגיאה בשמירה");
+              addToast('שגיאה בשמירה', 'error');
             }
           } catch (e) {
-            alert("שגיאה בשמירה");
+            addToast('שגיאה בשמירה', 'error');
           } finally {
             setLoading(false);
           }
@@ -594,6 +863,7 @@
             setLoading(true);
             try {
               await api.del("promo/" + id);
+              addToast('המבצע נמחק', 'success');
               onRefresh();
             } finally {
               setLoading(false);
@@ -628,13 +898,13 @@
         };
 
         return (
-          <div className="p-8">
-            <div className="flex justify-between items-center mb-8">
+          <div className="p-4 md:p-8 pt-16 md:pt-8">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 md:mb-8">
               <div>
-                <h2 className="text-3xl font-bold text-gray-800">
+                <h2 className="text-2xl md:text-3xl font-bold text-gray-800">
                   מבצעים פעילים
                 </h2>
-                <p className="text-gray-500">נהל את המבצעים שמופיעים בבוט</p>
+                <p className="text-gray-500 text-sm md:text-base">נהל את המבצעים שמופיעים בבוט</p>
               </div>
               <button
                 onClick={() => {
@@ -649,14 +919,14 @@
                   });
                   setIsModalOpen(true);
                 }}
-                className="bg-blue-600 text-white px-5 py-3 rounded-xl shadow-lg hover:bg-blue-700 transition flex items-center gap-2 font-bold transform hover:scale-105"
+                className="bg-blue-600 text-white px-4 md:px-5 py-2 md:py-3 rounded-xl shadow-lg hover:bg-blue-700 transition flex items-center gap-2 font-bold w-full sm:w-auto justify-center"
               >
                 <i className="ph ph-plus-circle text-xl"></i> מבצע חדש
               </button>
             </div>
 
             {/* גריד מבצעים */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
               {promos.map((promo) => {
                 const daysLeft = promo.expiry
                   ? Math.ceil(
@@ -742,21 +1012,21 @@
 
             {/* מודאל להוספה/עריכה */}
             {isModalOpen && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto modal-content flex flex-col">
-                  <div className="p-6 border-b flex justify-between items-center bg-gray-50 sticky top-0 z-10">
-                    <h3 className="text-xl font-bold text-gray-800">
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 modal-overlay">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] md:max-h-[90vh] overflow-y-auto modal-content flex flex-col">
+                  <div className="p-4 md:p-6 border-b flex justify-between items-center bg-gray-50 sticky top-0 z-10">
+                    <h3 className="text-lg md:text-xl font-bold text-gray-800">
                       {newPromo.id ? "עריכת מבצע" : "הוספת מבצע חדש"}
                     </h3>
                     <button
                       onClick={() => setIsModalOpen(false)}
-                      className="text-gray-400 hover:text-gray-600"
+                      className="text-gray-400 hover:text-gray-600 p-2"
                     >
                       <i className="ph ph-x text-2xl"></i>
                     </button>
                   </div>
-                  <div className="p-6 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 md:p-6 space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="text-sm font-bold text-gray-700">
                           כותרת <span className="text-red-500">*</span>
@@ -831,17 +1101,17 @@
                       * שדות חובה
                     </div>
                   </div>
-                  <div className="p-4 border-t bg-gray-50 flex justify-end gap-3 sticky bottom-0 z-10">
+                  <div className="p-4 border-t bg-gray-50 flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 sticky bottom-0 z-10">
                     <button
                       onClick={() => setIsModalOpen(false)}
-                      className="px-6 py-2 rounded-lg text-gray-600 hover:bg-gray-200"
+                      className="px-6 py-3 sm:py-2 rounded-lg text-gray-600 hover:bg-gray-200 w-full sm:w-auto"
                     >
                       ביטול
                     </button>
                     <button
                       onClick={handleSave}
                       disabled={loading}
-                      className="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 min-w-[120px] flex justify-center"
+                      className="px-6 py-3 sm:py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 min-w-[120px] flex justify-center w-full sm:w-auto"
                     >
                       {loading ? (
                         <div className="loader w-5 h-5 border-white border-t-transparent"></div>
@@ -860,21 +1130,25 @@
       const TextEditor = ({ title, type, initialText }) => {
         const [text, setText] = useState(initialText);
         const [saving, setSaving] = useState(false);
+        const { addToast } = useToast();
+        const { hasDraft, clearDraft } = useAutoSave(`content_${type}`, { text }, true);
+
         const handleSave = async () => {
           setSaving(true);
           try {
             await api.post("content", { type, text });
-            alert("נשמר");
+            clearDraft();
+            addToast('נשמר בהצלחה!', 'success');
           } catch (e) {
-            alert("שגיאה בשמירה");
+            addToast('שגיאה בשמירה', 'error');
           } finally {
             setSaving(false);
           }
         };
         const itemLabel = type === "tips" ? "טיפ" : "מידע";
         return (
-          <div className="p-8 max-w-4xl mx-auto">
-            <h2 className="text-2xl font-bold mb-4 text-gray-800">{title}</h2>
+          <div className="p-4 md:p-8 pt-16 md:pt-8 max-w-4xl mx-auto">
+            <h2 className="text-xl md:text-2xl font-bold mb-4 text-gray-800">{title}</h2>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 flex items-center gap-2 text-sm text-amber-800">
               <i className="ph ph-info text-lg"></i>
               <span>
@@ -891,7 +1165,7 @@
             <div className="mt-4 flex justify-end">
               <button
                 onClick={handleSave}
-                className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition"
+                className="bg-blue-600 text-white px-8 py-4 md:py-3 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition w-full md:w-auto"
               >
                 {saving ? "שומר..." : "שמור שינויים"}
               </button>
@@ -901,7 +1175,7 @@
       };
 
       // --- האפליקציה הראשית ---
-      const App = () => {
+      const AppContent = () => {
         const [view, setView] = useState("hours");
         const [data, setData] = useState(null);
         const [loading, setLoading] = useState(true);
@@ -913,6 +1187,44 @@
         const [filterRegions, setFilterRegions] = useState([]);
         const [regionDropdownOpen, setRegionDropdownOpen] = useState(false);
         const [regionList, setRegionList] = useState([]);
+        const [sidebarOpen, setSidebarOpen] = useState(false);
+        const [pullProgress, setPullProgress] = useState(0);
+        const [isRefreshing, setIsRefreshing] = useState(false);
+        const { addToast } = useToast();
+
+        // Debounced search
+        const debouncedSearch = useDebounce(branchSearch, 300);
+
+        // Pull to refresh
+        const mainRef = useRef(null);
+        const touchStartY = useRef(0);
+
+        const handleTouchStart = (e) => {
+          if (mainRef.current?.scrollTop === 0) {
+            touchStartY.current = e.touches[0].clientY;
+          }
+        };
+
+        const handleTouchMove = (e) => {
+          if (mainRef.current?.scrollTop === 0 && touchStartY.current > 0) {
+            const currentY = e.touches[0].clientY;
+            const diff = currentY - touchStartY.current;
+            if (diff > 0 && diff < 150) {
+              setPullProgress(Math.min(diff / 100, 1));
+            }
+          }
+        };
+
+        const handleTouchEnd = async () => {
+          if (pullProgress >= 1 && !isRefreshing) {
+            setIsRefreshing(true);
+            await loadData();
+            addToast('הנתונים עודכנו', 'success');
+            setIsRefreshing(false);
+          }
+          setPullProgress(0);
+          touchStartY.current = 0;
+        };
 
         const loadData = async () => {
           setLoading(true);
@@ -924,7 +1236,7 @@
             setData(result);
             setRegionList(regionsResult.regions || []);
           } catch (e) {
-            alert("שגיאה בטעינת נתונים");
+            addToast('שגיאה בטעינת נתונים', 'error');
           } finally {
             setLoading(false);
           }
@@ -936,8 +1248,28 @@
 
         if (loading && !data)
           return (
-            <div className="h-screen flex items-center justify-center bg-gray-50">
-              <div className="loader w-10 h-10"></div>
+            <div className="flex h-screen bg-gray-100 overflow-hidden font-sans">
+              <aside className="hidden md:flex w-64 bg-white border-l shadow-2xl flex-col z-20">
+                <div className="p-6 bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-md">
+                  <div className="font-bold text-xl flex items-center gap-2">
+                    <i className="ph ph-storefront"></i> סופר ספיר
+                  </div>
+                  <div className="text-xs opacity-80 mt-1">ממשק ניהול בוט</div>
+                </div>
+                <nav className="p-4 space-y-2 flex-1">
+                  {[1,2,3,4,5].map(i => (
+                    <div key={i} className="skeleton h-12 w-full rounded-xl"></div>
+                  ))}
+                </nav>
+              </aside>
+              <main className="flex-1 p-4 md:p-8 pt-20 md:pt-8">
+                <div className="skeleton h-8 w-48 mb-6"></div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
+                  {[1,2,3,4,5,6,7,8].map(i => (
+                    <BranchCardSkeleton key={i} />
+                  ))}
+                </div>
+              </main>
             </div>
           );
 
@@ -963,72 +1295,134 @@
           }
         };
 
-        return (
-          <div className="flex h-screen bg-gray-100 overflow-hidden font-sans">
-            <aside className="w-64 bg-white border-l shadow-2xl flex flex-col z-20">
-              <div className="p-6 bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-md">
+        const handleNavClick = (newView) => {
+          setView(newView);
+          if (newView === "hours") setEditingBranchId(null);
+          setSidebarOpen(false);
+        };
+
+        const SidebarContent = () => (
+          <>
+            <div className="p-6 bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-md">
+              <div className="flex justify-between items-center">
                 <div className="font-bold text-xl flex items-center gap-2">
                   <i className="ph ph-storefront"></i> סופר ספיר
                 </div>
-                <div className="text-xs opacity-80 mt-1">ממשק ניהול בוט</div>
+                <button
+                  onClick={() => setSidebarOpen(false)}
+                  className="md:hidden text-white/80 hover:text-white p-1"
+                >
+                  <i className="ph ph-x text-xl"></i>
+                </button>
               </div>
-              <nav className="p-4 space-y-2 flex-1 overflow-y-auto">
-                <div className="text-xs font-bold text-gray-400 px-2 mb-1">
-                  תפריט ראשי
-                </div>
-                <button
-                  onClick={() => {
-                    setView("hours");
-                    setEditingBranchId(null);
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-right transition ${view === "hours" ? "bg-blue-50 text-blue-700 font-bold shadow-sm ring-1 ring-blue-200" : "text-gray-600 hover:bg-gray-50"}`}
-                >
-                  <i className="ph ph-clock text-xl"></i> ניהול סניפים
-                </button>
-                <button
-                  onClick={() => setView("promos")}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-right transition ${view === "promos" ? "bg-purple-50 text-purple-700 font-bold shadow-sm ring-1 ring-purple-200" : "text-gray-600 hover:bg-gray-50"}`}
-                >
-                  <i className="ph ph-megaphone text-xl"></i> מבצעים
-                </button>
-
-                <div className="text-xs font-bold text-gray-400 px-2 mb-1 mt-6">
-                  תוכן
-                </div>
-                <button
-                  onClick={() => setView("tips")}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-right transition ${view === "tips" ? "bg-yellow-50 text-yellow-700 font-bold shadow-sm ring-1 ring-yellow-200" : "text-gray-600 hover:bg-gray-50"}`}
-                >
-                  <i className="ph ph-lightbulb text-xl"></i> טיפים
-                </button>
-                <button
-                  onClick={() => setView("info")}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-right transition ${view === "info" ? "bg-blue-50 text-blue-700 font-bold shadow-sm ring-1 ring-blue-200" : "text-gray-600 hover:bg-gray-50"}`}
-                >
-                  <i className="ph ph-info text-xl"></i> מידע כללי
-                </button>
-
-                <div className="text-xs font-bold text-gray-400 px-2 mb-1 mt-6">
-                  קישורים
-                </div>
-                <a
-                  href="https://airtable.com/appNvxRTapf0u3L2d/shrHZmuTIcVQcVt1D"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-right transition text-gray-600 hover:bg-indigo-50 hover:text-indigo-700"
-                >
-                  <i className="ph ph-chart-bar text-xl"></i> סטטיסטיקות בוט{" "}
-                  <i className="ph ph-arrow-square-out text-sm mr-auto"></i>
-                </a>
-              </nav>
-              <div className="p-4 border-t text-center text-xs text-gray-400">
-                V3.3
+              <div className="text-xs opacity-80 mt-1">ממשק ניהול בוט</div>
+            </div>
+            <nav className="p-4 space-y-2 flex-1 overflow-y-auto">
+              <div className="text-xs font-bold text-gray-400 px-2 mb-1">
+                תפריט ראשי
               </div>
+              <button
+                onClick={() => handleNavClick("hours")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-right transition ${view === "hours" ? "bg-blue-50 text-blue-700 font-bold shadow-sm ring-1 ring-blue-200" : "text-gray-600 hover:bg-gray-50"}`}
+              >
+                <i className="ph ph-clock text-xl"></i> ניהול סניפים
+              </button>
+              <button
+                onClick={() => handleNavClick("promos")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-right transition ${view === "promos" ? "bg-purple-50 text-purple-700 font-bold shadow-sm ring-1 ring-purple-200" : "text-gray-600 hover:bg-gray-50"}`}
+              >
+                <i className="ph ph-megaphone text-xl"></i> מבצעים
+              </button>
+
+              <div className="text-xs font-bold text-gray-400 px-2 mb-1 mt-6">
+                תוכן
+              </div>
+              <button
+                onClick={() => handleNavClick("tips")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-right transition ${view === "tips" ? "bg-yellow-50 text-yellow-700 font-bold shadow-sm ring-1 ring-yellow-200" : "text-gray-600 hover:bg-gray-50"}`}
+              >
+                <i className="ph ph-lightbulb text-xl"></i> טיפים
+              </button>
+              <button
+                onClick={() => handleNavClick("info")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-right transition ${view === "info" ? "bg-blue-50 text-blue-700 font-bold shadow-sm ring-1 ring-blue-200" : "text-gray-600 hover:bg-gray-50"}`}
+              >
+                <i className="ph ph-info text-xl"></i> מידע כללי
+              </button>
+
+              <div className="text-xs font-bold text-gray-400 px-2 mb-1 mt-6">
+                קישורים
+              </div>
+              <a
+                href="https://airtable.com/appNvxRTapf0u3L2d/shrHZmuTIcVQcVt1D"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-right transition text-gray-600 hover:bg-indigo-50 hover:text-indigo-700"
+              >
+                <i className="ph ph-chart-bar text-xl"></i> סטטיסטיקות בוט{" "}
+                <i className="ph ph-arrow-square-out text-sm mr-auto"></i>
+              </a>
+            </nav>
+            <div className="p-4 border-t text-center text-xs text-gray-400">
+              V3.4
+            </div>
+          </>
+        );
+
+        return (
+          <div className="flex h-screen bg-gray-100 overflow-hidden font-sans">
+            {/* Mobile Header */}
+            <div className="md:hidden fixed top-0 left-0 right-0 bg-gradient-to-br from-blue-600 to-blue-700 text-white p-4 flex justify-between items-center z-30 shadow-md">
+              <div className="font-bold text-lg flex items-center gap-2">
+                <i className="ph ph-storefront"></i> סופר ספיר
+              </div>
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="p-2 hover:bg-white/10 rounded-lg"
+              >
+                <i className="ph ph-list text-2xl"></i>
+              </button>
+            </div>
+
+            {/* Mobile Sidebar Overlay */}
+            {sidebarOpen && (
+              <div
+                className="sidebar-overlay md:hidden"
+                onClick={() => setSidebarOpen(false)}
+              />
+            )}
+
+            {/* Sidebar - Desktop */}
+            <aside className="hidden md:flex w-64 bg-white border-l shadow-2xl flex-col z-20">
+              <SidebarContent />
             </aside>
 
-            <main className="flex-1 overflow-y-auto relative scroll-smooth">
+            {/* Sidebar - Mobile */}
+            {sidebarOpen && (
+              <aside className="sidebar-mobile md:hidden bg-white border-l shadow-2xl flex flex-col">
+                <SidebarContent />
+              </aside>
+            )}
+
+            <main
+              ref={mainRef}
+              className="flex-1 overflow-y-auto relative scroll-smooth pt-16 md:pt-0"
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
+              {/* Pull to refresh indicator */}
+              {pullProgress > 0 && (
+                <div
+                  className="pull-indicator md:hidden"
+                  style={{ opacity: pullProgress, transform: `translateX(-50%) translateY(${pullProgress * 20}px)` }}
+                >
+                  <i className={`ph ${isRefreshing ? 'ph-spinner animate-spin' : 'ph-arrow-down'}`}></i>
+                  {isRefreshing ? 'מרענן...' : 'שחרר לרענון'}
+                </div>
+              )}
               {view === "hours" && (
-                <div className="p-8">
+                <div className="p-4 md:p-8">
                   {editingBranchId || isAddingNew ? (
                     <BranchEditor
                       branch={
@@ -1108,8 +1502,8 @@
                       </div>
 
                       {/* פילטרים */}
-                      <div className="flex gap-4 mb-6 flex-wrap items-center">
-                        <label className="flex items-center gap-2 cursor-pointer text-sm bg-white px-3 py-2 rounded-lg border hover:bg-gray-50 smooth-transition">
+                      <div className="flex gap-2 md:gap-4 mb-4 md:mb-6 flex-wrap items-center">
+                        <label className="flex items-center gap-1 md:gap-2 cursor-pointer text-xs md:text-sm bg-white px-2 md:px-3 py-2 rounded-lg border hover:bg-gray-50 smooth-transition">
                           <input
                             type="checkbox"
                             checked={filterNoGroup}
@@ -1117,9 +1511,10 @@
                             className="text-blue-600 rounded"
                           />
                           <i className="ph ph-whatsapp-logo text-gray-500"></i>
-                          <span>ללא קישור לקבוצה</span>
+                          <span className="hidden sm:inline">ללא קישור לקבוצה</span>
+                          <span className="sm:hidden">ללא קבוצה</span>
                         </label>
-                        <label className="flex items-center gap-2 cursor-pointer text-sm bg-white px-3 py-2 rounded-lg border hover:bg-gray-50 smooth-transition">
+                        <label className="flex items-center gap-1 md:gap-2 cursor-pointer text-xs md:text-sm bg-white px-2 md:px-3 py-2 rounded-lg border hover:bg-gray-50 smooth-transition">
                           <input
                             type="checkbox"
                             checked={filterNoWaze}
@@ -1127,7 +1522,8 @@
                             className="text-blue-600 rounded"
                           />
                           <i className="ph ph-navigation-arrow text-gray-500"></i>
-                          <span>ללא קישור ל-Waze</span>
+                          <span className="hidden sm:inline">ללא קישור ל-Waze</span>
+                          <span className="sm:hidden">ללא Waze</span>
                         </label>
 
                         {/* סינון לפי אזור */}
@@ -1164,7 +1560,7 @@
                                 return (
                                   <label
                                     key={regionName}
-                                    className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer"
+                                    className="flex items-center gap-2 px-3 py-3 md:py-2 hover:bg-gray-50 cursor-pointer"
                                   >
                                     <input
                                       type="checkbox"
@@ -1188,12 +1584,12 @@
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
                         {data.branches
                           .filter(
                             (b) =>
-                              (b.name.includes(branchSearch) ||
-                              b.address.includes(branchSearch)) &&
+                              (b.name.includes(debouncedSearch) ||
+                              b.address.includes(debouncedSearch)) &&
                               (!filterNoGroup || !b.groupLink) &&
                               (!filterNoWaze || !b.waze) &&
                               (filterRegions.length === 0 || filterRegions.includes(b.region)),
@@ -1277,6 +1673,13 @@
           </div>
         );
       };
+
+      // Wrap App with ToastProvider
+      const App = () => (
+        <ToastProvider>
+          <AppContent />
+        </ToastProvider>
+      );
 
       const root = ReactDOM.createRoot(document.getElementById("root"));
       root.render(<App />);
