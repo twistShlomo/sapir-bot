@@ -1,5 +1,25 @@
 const IMGBB_API_KEY = "f80975e82a556615b17c466496477982";
 
+// Helper function to add part field to branches based on region grouping
+function addPartToBranches(branches) {
+  // Group by region to calculate part within each region
+  const regionCounters = {};
+
+  // First pass: calculate part for each branch based on its position within its region
+  const branchesWithPart = branches.map(b => {
+    const region = b.region || 'ללא אזור';
+    if (regionCounters[region] === undefined) {
+      regionCounters[region] = 0;
+    }
+    const indexWithinRegion = regionCounters[region];
+    regionCounters[region]++;
+    const part = Math.floor(indexWithinRegion / 10) + 1;
+    return { ...b, part };
+  });
+
+  return branchesWithPart;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -129,23 +149,30 @@ async function handleAPI(url, request, env) {
 
       // Bot: all branches list
       if (path === 'branches') {
-        const branches = await env.DB.prepare('SELECT * FROM branches').all();
+        const branches = await env.DB.prepare('SELECT * FROM branches ORDER BY region, name').all();
+
+        // Map to objects first
+        const mappedBranches = branches.results.map(b => ({
+          name: b.name,
+          address: b.address,
+          sunday: b.sunday,
+          monday: b.monday,
+          tuesday: b.tuesday,
+          wednesday: b.wednesday,
+          thursday: b.thursday,
+          friday: b.friday,
+          saturday_night: b.saturday,
+          waze_link: b.waze,
+          group_link: b.group_link,
+          notes: b.notes,
+          region: b.region || '',
+        }));
+
+        // Add part field
+        const branchesWithPart = addPartToBranches(mappedBranches);
+
         return Response.json({
-          branches: branches.results.map(b => ({
-            name: b.name,
-            address: b.address,
-            sunday: b.sunday,
-            monday: b.monday,
-            tuesday: b.tuesday,
-            wednesday: b.wednesday,
-            thursday: b.thursday,
-            friday: b.friday,
-            saturday_night: b.saturday,
-            waze_link: b.waze,
-            group_link: b.group_link,
-            notes: b.notes,
-            region: b.region || '',
-          })),
+          branches: branchesWithPart,
         });
       }
 
@@ -159,15 +186,23 @@ async function handleAPI(url, request, env) {
 
       // Bot: all regions with their branches
       if (path === 'regions') {
-        const branches = await env.DB.prepare('SELECT * FROM branches').all();
+        const branches = await env.DB.prepare('SELECT * FROM branches ORDER BY region, name').all();
 
-        // Group branches by region
+        // Group branches by region with part calculation
         const regionMap = {};
+        const regionCounters = {};
+
         for (const b of branches.results) {
           const region = b.region || 'ללא אזור';
           if (!regionMap[region]) {
             regionMap[region] = [];
+            regionCounters[region] = 0;
           }
+
+          const indexWithinRegion = regionCounters[region];
+          regionCounters[region]++;
+          const part = Math.floor(indexWithinRegion / 10) + 1;
+
           regionMap[region].push({
             name: b.name,
             address: b.address,
@@ -181,6 +216,7 @@ async function handleAPI(url, request, env) {
             waze_link: b.waze,
             group_link: b.group_link,
             notes: b.notes,
+            part,
           });
         }
 
