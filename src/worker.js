@@ -1,5 +1,134 @@
 const IMGBB_API_KEY = "f80975e82a556615b17c466496477982";
 
+// ========== BOT CONFIGURATIONS ==========
+// Each bot has its own column mapping for the shared Airtable table
+const BOT_CONFIGS = {
+  sapir: {
+    name: "סופר ספיר",
+    baseId: "appNvxRTapf0u3L2d",
+    tableId: "tbl7OaVz2hbzEskUQ",
+    columns: {
+      confirmedMailing: "אישר_דיוור_סופר_ספיר",
+      receivedLink: "קיבל_קישור_סופר_ספיר",
+      branch: "סניף_סופר_ספיר",
+      trigger: "trigger_sapir",
+      lastRegister: "last_register_sapir",
+      lastMessage: "last_message_sapir",
+    },
+    shared: {
+      created: "Created",
+      phone: "phone_number",
+      name: "name",
+    }
+  },
+  // Add more bots here with their column mappings
+  // neto: { name: "נטו חיסכון", columns: { confirmedMailing: "אישר_דיוור", ... } }
+};
+
+// Current active bot (can be changed per deployment)
+const ACTIVE_BOT = "sapir";
+
+// ========== AIRTABLE CLIENT ==========
+class AirtableClient {
+  constructor(apiKey, baseId) {
+    this.apiKey = apiKey;
+    this.baseId = baseId;
+    this.lastRequestTime = 0;
+    this.minInterval = 210; // 5 req/sec = 200ms, adding buffer
+  }
+
+  async delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async fetchWithRateLimit(url) {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    if (timeSinceLastRequest < this.minInterval) {
+      await this.delay(this.minInterval - timeSinceLastRequest);
+    }
+    this.lastRequestTime = Date.now();
+
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Airtable API error: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  async fetchAllRecords(tableId, fields) {
+    const records = [];
+    let offset = null;
+    let pageCount = 0;
+
+    // Build fields query string
+    const fieldsQuery = fields.map(f => `fields[]=${encodeURIComponent(f)}`).join('&');
+
+    do {
+      let url = `https://api.airtable.com/v0/${this.baseId}/${tableId}?${fieldsQuery}&pageSize=100`;
+      if (offset) {
+        url += `&offset=${offset}`;
+      }
+
+      const data = await this.fetchWithRateLimit(url);
+      records.push(...data.records);
+      offset = data.offset;
+      pageCount++;
+
+    } while (offset);
+
+    return { records, pageCount };
+  }
+
+  // Stream records with progress updates (for frontend polling)
+  async fetchRecordsWithProgress(tableId, fields, progressCallback) {
+    const records = [];
+    let offset = null;
+    let pageCount = 0;
+    let estimatedTotal = 0;
+
+    const fieldsQuery = fields.map(f => `fields[]=${encodeURIComponent(f)}`).join('&');
+
+    do {
+      let url = `https://api.airtable.com/v0/${this.baseId}/${tableId}?${fieldsQuery}&pageSize=100`;
+      if (offset) {
+        url += `&offset=${offset}`;
+      }
+
+      const data = await this.fetchWithRateLimit(url);
+      records.push(...data.records);
+      offset = data.offset;
+      pageCount++;
+
+      // Estimate total based on whether there's more data
+      if (offset) {
+        estimatedTotal = Math.max(estimatedTotal, records.length + 100);
+      } else {
+        estimatedTotal = records.length;
+      }
+
+      if (progressCallback) {
+        progressCallback({
+          current: records.length,
+          estimated: estimatedTotal,
+          pages: pageCount,
+          done: !offset
+        });
+      }
+
+    } while (offset);
+
+    return { records, pageCount, total: records.length };
+  }
+}
+
 // Helper function to add part field to branches based on region grouping
 function addPartToBranches(branches) {
   // Group by region to calculate part within each region
@@ -257,6 +386,95 @@ async function handleAPI(url, request, env) {
       if (path.startsWith('promo/')) {
         const branchName = decodeURIComponent(path.replace('promo/', ''));
         return await getBestPromo(env, branchName);
+      }
+
+      // ========== ANALYTICS ENDPOINTS ==========
+
+      // Get analytics data from Airtable - with pagination to avoid subrequest limits
+      // Client calls this multiple times with offset parameter until done=true
+      if (path === 'analytics/data') {
+        const botConfig = BOT_CONFIGS[ACTIVE_BOT];
+        if (!env.AIRTABLE_API_KEY) {
+          return Response.json({ error: 'Airtable API key not configured' }, { status: 500 });
+        }
+
+        const offset = url.searchParams.get('offset') || null;
+        const client = new AirtableClient(env.AIRTABLE_API_KEY, botConfig.baseId);
+
+        // Get all needed fields
+        const fields = [
+          ...Object.values(botConfig.columns),
+          ...Object.values(botConfig.shared),
+        ];
+
+        try {
+          // Fetch one page at a time (max 100 records per request)
+          // This keeps us well under the 50 subrequest limit per invocation
+          const fieldsQuery = fields.map(f => `fields[]=${encodeURIComponent(f)}`).join('&');
+          let apiUrl = `https://api.airtable.com/v0/${botConfig.baseId}/${botConfig.tableId}?${fieldsQuery}&pageSize=100`;
+          if (offset) {
+            apiUrl += `&offset=${offset}`;
+          }
+
+          const response = await fetch(apiUrl, {
+            headers: {
+              'Authorization': `Bearer ${env.AIRTABLE_API_KEY}`,
+              'Content-Type': 'application/json',
+            }
+          });
+
+          if (!response.ok) {
+            throw new Error(`Airtable API error: ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          // Transform records to analytics format
+          const analyticsData = data.records.map(record => {
+            const f = record.fields;
+            return {
+              id: record.id,
+              phone: f[botConfig.shared.phone] || '',
+              name: f[botConfig.shared.name] || '',
+              created: f[botConfig.shared.created] || null,
+              branch: f[botConfig.columns.branch] || '',
+              confirmedMailing: !!f[botConfig.columns.confirmedMailing],
+              receivedLink: !!f[botConfig.columns.receivedLink],
+              trigger: f[botConfig.columns.trigger] || '',
+              lastRegister: f[botConfig.columns.lastRegister] || null,
+              lastMessage: f[botConfig.columns.lastMessage] || null,
+            };
+          });
+
+          // Filter only users that have interacted with this bot
+          const botUsers = analyticsData.filter(user =>
+            user.branch ||
+            user.confirmedMailing ||
+            user.receivedLink ||
+            user.trigger ||
+            user.lastRegister ||
+            user.lastMessage
+          );
+
+          return Response.json({
+            success: true,
+            botName: botConfig.name,
+            data: botUsers,
+            meta: {
+              pageRecords: data.records.length,
+              botUsersInPage: botUsers.length,
+              nextOffset: data.offset || null,
+              done: !data.offset,
+              fetchedAt: new Date().toISOString(),
+            }
+          });
+
+        } catch (error) {
+          return Response.json({
+            error: error.message,
+            details: 'Failed to fetch data from Airtable'
+          }, { status: 500 });
+        }
       }
     }
 
