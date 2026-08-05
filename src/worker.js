@@ -390,13 +390,15 @@ async function handleAPI(url, request, env) {
 
       // ========== ANALYTICS ENDPOINTS ==========
 
-      // Get analytics data from Airtable
+      // Get analytics data from Airtable - with pagination to avoid subrequest limits
+      // Client calls this multiple times with offset parameter until done=true
       if (path === 'analytics/data') {
         const botConfig = BOT_CONFIGS[ACTIVE_BOT];
         if (!env.AIRTABLE_API_KEY) {
           return Response.json({ error: 'Airtable API key not configured' }, { status: 500 });
         }
 
+        const offset = url.searchParams.get('offset') || null;
         const client = new AirtableClient(env.AIRTABLE_API_KEY, botConfig.baseId);
 
         // Get all needed fields
@@ -406,31 +408,45 @@ async function handleAPI(url, request, env) {
         ];
 
         try {
-          const { records, pageCount, total } = await client.fetchRecordsWithProgress(
-            botConfig.tableId,
-            fields,
-            null // No callback for non-streaming
-          );
+          // Fetch one page at a time (max 100 records per request)
+          // This keeps us well under the 50 subrequest limit per invocation
+          const fieldsQuery = fields.map(f => `fields[]=${encodeURIComponent(f)}`).join('&');
+          let apiUrl = `https://api.airtable.com/v0/${botConfig.baseId}/${botConfig.tableId}?${fieldsQuery}&pageSize=100`;
+          if (offset) {
+            apiUrl += `&offset=${offset}`;
+          }
+
+          const response = await fetch(apiUrl, {
+            headers: {
+              'Authorization': `Bearer ${env.AIRTABLE_API_KEY}`,
+              'Content-Type': 'application/json',
+            }
+          });
+
+          if (!response.ok) {
+            throw new Error(`Airtable API error: ${response.status}`);
+          }
+
+          const data = await response.json();
 
           // Transform records to analytics format
-          const analyticsData = records.map(record => {
-            const fields = record.fields;
+          const analyticsData = data.records.map(record => {
+            const f = record.fields;
             return {
               id: record.id,
-              phone: fields[botConfig.shared.phone] || '',
-              name: fields[botConfig.shared.name] || '',
-              created: fields[botConfig.shared.created] || null,
-              branch: fields[botConfig.columns.branch] || '',
-              confirmedMailing: !!fields[botConfig.columns.confirmedMailing],
-              receivedLink: !!fields[botConfig.columns.receivedLink],
-              trigger: fields[botConfig.columns.trigger] || '',
-              lastRegister: fields[botConfig.columns.lastRegister] || null,
-              lastMessage: fields[botConfig.columns.lastMessage] || null,
+              phone: f[botConfig.shared.phone] || '',
+              name: f[botConfig.shared.name] || '',
+              created: f[botConfig.shared.created] || null,
+              branch: f[botConfig.columns.branch] || '',
+              confirmedMailing: !!f[botConfig.columns.confirmedMailing],
+              receivedLink: !!f[botConfig.columns.receivedLink],
+              trigger: f[botConfig.columns.trigger] || '',
+              lastRegister: f[botConfig.columns.lastRegister] || null,
+              lastMessage: f[botConfig.columns.lastMessage] || null,
             };
           });
 
           // Filter only users that have interacted with this bot
-          // (have at least one of the bot-specific fields filled)
           const botUsers = analyticsData.filter(user =>
             user.branch ||
             user.confirmedMailing ||
@@ -445,9 +461,10 @@ async function handleAPI(url, request, env) {
             botName: botConfig.name,
             data: botUsers,
             meta: {
-              totalRecords: total,
-              botUsers: botUsers.length,
-              pages: pageCount,
+              pageRecords: data.records.length,
+              botUsersInPage: botUsers.length,
+              nextOffset: data.offset || null,
+              done: !data.offset,
               fetchedAt: new Date().toISOString(),
             }
           });
@@ -457,35 +474,6 @@ async function handleAPI(url, request, env) {
             error: error.message,
             details: 'Failed to fetch data from Airtable'
           }, { status: 500 });
-        }
-      }
-
-      // Get available branches for filter dropdown
-      if (path === 'analytics/branches-list') {
-        const botConfig = BOT_CONFIGS[ACTIVE_BOT];
-        if (!env.AIRTABLE_API_KEY) {
-          return Response.json({ error: 'Airtable API key not configured' }, { status: 500 });
-        }
-
-        const client = new AirtableClient(env.AIRTABLE_API_KEY, botConfig.baseId);
-
-        try {
-          const { records } = await client.fetchAllRecords(
-            botConfig.tableId,
-            [botConfig.columns.branch]
-          );
-
-          // Get unique branches
-          const branches = [...new Set(
-            records
-              .map(r => r.fields[botConfig.columns.branch])
-              .filter(Boolean)
-          )].sort();
-
-          return Response.json({ branches });
-
-        } catch (error) {
-          return Response.json({ error: error.message }, { status: 500 });
         }
       }
     }

@@ -1283,7 +1283,7 @@
       };
 
       // Loading Progress Overlay
-      const AnalyticsLoadingOverlay = ({ progress, estimatedTotal }) => {
+      const AnalyticsLoadingOverlay = ({ progress, estimatedTotal, pages }) => {
         const percentage = estimatedTotal > 0 ? Math.round((progress / estimatedTotal) * 100) : 0;
 
         return (
@@ -1293,18 +1293,20 @@
                 <i className="ph ph-database text-3xl text-blue-600 animate-pulse"></i>
               </div>
               <h3 className="text-xl font-bold text-gray-800 mb-2">טוען נתונים מ-Airtable</h3>
-              <p className="text-gray-500 text-sm mb-4">אנא המתן, זה יכול לקחת מספר שניות...</p>
+              <p className="text-gray-500 text-sm mb-4">
+                טוען עמוד {pages || 1}... אנא המתן
+              </p>
 
               <div className="progress-bar-container">
                 <div
                   className="progress-bar-fill"
-                  style={{ width: `${Math.min(percentage, 100)}%` }}
+                  style={{ width: `${Math.min(percentage, 95)}%` }}
                 ></div>
               </div>
 
               <div className="flex justify-between text-sm text-gray-600">
-                <span>{progress.toLocaleString('he-IL')} רשומות נטענו</span>
-                <span>{percentage}%</span>
+                <span>{progress.toLocaleString('he-IL')} משתמשים נטענו</span>
+                <span>{pages ? `עמוד ${pages}` : 'מתחיל...'}</span>
               </div>
             </div>
           </div>
@@ -1734,7 +1736,7 @@
       const AnalyticsDashboard = () => {
         const [data, setData] = useState(null);
         const [loading, setLoading] = useState(true);
-        const [loadingProgress, setLoadingProgress] = useState({ current: 0, estimated: 0 });
+        const [loadingProgress, setLoadingProgress] = useState({ current: 0, estimated: 0, pages: 0 });
         const [error, setError] = useState(null);
         const [dateRange, setDateRange] = useState({ from: '', to: '' });
         const [filterBranch, setFilterBranch] = useState('');
@@ -1743,32 +1745,48 @@
         const loadData = async () => {
           setLoading(true);
           setError(null);
-
-          // Simulate progress updates
-          const progressInterval = setInterval(() => {
-            setLoadingProgress(prev => ({
-              current: Math.min(prev.current + Math.random() * 50, prev.estimated - 10),
-              estimated: prev.estimated || 1000
-            }));
-          }, 200);
+          setLoadingProgress({ current: 0, estimated: 0, pages: 0 });
 
           try {
-            const result = await api.get('analytics/data');
-            clearInterval(progressInterval);
+            // Fetch data page by page from Airtable via our API
+            const allData = [];
+            let nextOffset = null;
+            let pageCount = 0;
 
-            if (result.error) {
-              throw new Error(result.error);
-            }
+            do {
+              const endpoint = nextOffset
+                ? `analytics/data?offset=${encodeURIComponent(nextOffset)}`
+                : 'analytics/data';
 
-            setData(result.data);
-            setLoadingProgress({ current: result.meta.botUsers, estimated: result.meta.botUsers });
-            addToast(`נטענו ${result.meta.botUsers.toLocaleString('he-IL')} משתמשים`, 'success');
+              const result = await api.get(endpoint);
+
+              if (result.error) {
+                throw new Error(result.error);
+              }
+
+              // Add this page's data to our collection
+              allData.push(...result.data);
+              nextOffset = result.meta.nextOffset;
+              pageCount++;
+
+              // Update progress - estimate based on whether there's more data
+              const estimated = nextOffset ? allData.length + 500 : allData.length;
+              setLoadingProgress({
+                current: allData.length,
+                estimated: estimated,
+                pages: pageCount
+              });
+
+            } while (nextOffset);
+
+            setData(allData);
+            addToast(`נטענו ${allData.length.toLocaleString('he-IL')} משתמשים`, 'success');
+
           } catch (e) {
-            clearInterval(progressInterval);
             setError(e.message);
             addToast('שגיאה בטעינת נתונים: ' + e.message, 'error');
           } finally {
-            setTimeout(() => setLoading(false), 500);
+            setTimeout(() => setLoading(false), 300);
           }
         };
 
@@ -1958,6 +1976,7 @@
               <AnalyticsLoadingOverlay
                 progress={loadingProgress.current}
                 estimatedTotal={loadingProgress.estimated}
+                pages={loadingProgress.pages}
               />
             )}
 
