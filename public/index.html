@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Sapir Bot v3.4 -->
+<!-- Sapir Bot v3.5 -->
 <html lang="he" dir="rtl">
   <head>
     <meta charset="UTF-8" />
@@ -226,7 +226,75 @@
         animation: fadeIn 0.3s ease-out;
         z-index: 50;
       }
+      /* Analytics Dashboard Styles */
+      .kpi-card {
+        background: white;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        transition: all 0.2s ease;
+      }
+      .kpi-card:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        transform: translateY(-2px);
+      }
+      .funnel-bar {
+        transition: width 0.8s ease-out;
+      }
+      .counter-animate {
+        transition: all 0.3s ease-out;
+      }
+      .progress-ring {
+        transform: rotate(-90deg);
+      }
+      .chart-container {
+        background: white;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      }
+      .data-table th {
+        position: sticky;
+        top: 0;
+        background: white;
+        z-index: 10;
+      }
+      .analytics-loading-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(4px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+      }
+      .analytics-loading-card {
+        background: white;
+        border-radius: 20px;
+        padding: 32px;
+        max-width: 400px;
+        width: 90%;
+        text-align: center;
+        animation: scaleIn 0.3s ease-out;
+      }
+      .progress-bar-container {
+        background: #e5e7eb;
+        border-radius: 999px;
+        height: 12px;
+        overflow: hidden;
+        margin: 16px 0;
+      }
+      .progress-bar-fill {
+        background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+        height: 100%;
+        border-radius: 999px;
+        transition: width 0.3s ease-out;
+      }
     </style>
+
+    <!-- Chart.js for analytics charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   </head>
   <body>
     <div id="root"></div>
@@ -1174,6 +1242,891 @@
         );
       };
 
+      // --- Analytics Dashboard Components ---
+
+      // Animated counter hook
+      const useAnimatedCounter = (targetValue, duration = 1000) => {
+        const [displayValue, setDisplayValue] = useState(0);
+        const animationRef = useRef(null);
+
+        useEffect(() => {
+          if (targetValue === undefined || targetValue === null) return;
+
+          const startValue = 0;
+          const startTime = Date.now();
+
+          const animate = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // Easing function (ease-out)
+            const easeOut = 1 - Math.pow(1 - progress, 3);
+            const currentValue = Math.floor(startValue + (targetValue - startValue) * easeOut);
+
+            setDisplayValue(currentValue);
+
+            if (progress < 1) {
+              animationRef.current = requestAnimationFrame(animate);
+            }
+          };
+
+          animationRef.current = requestAnimationFrame(animate);
+
+          return () => {
+            if (animationRef.current) {
+              cancelAnimationFrame(animationRef.current);
+            }
+          };
+        }, [targetValue, duration]);
+
+        return displayValue;
+      };
+
+      // Loading Progress Overlay
+      const AnalyticsLoadingOverlay = ({ progress, estimatedTotal }) => {
+        const percentage = estimatedTotal > 0 ? Math.round((progress / estimatedTotal) * 100) : 0;
+
+        return (
+          <div className="analytics-loading-overlay">
+            <div className="analytics-loading-card">
+              <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-full flex items-center justify-center">
+                <i className="ph ph-database text-3xl text-blue-600 animate-pulse"></i>
+              </div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">טוען נתונים מ-Airtable</h3>
+              <p className="text-gray-500 text-sm mb-4">אנא המתן, זה יכול לקחת מספר שניות...</p>
+
+              <div className="progress-bar-container">
+                <div
+                  className="progress-bar-fill"
+                  style={{ width: `${Math.min(percentage, 100)}%` }}
+                ></div>
+              </div>
+
+              <div className="flex justify-between text-sm text-gray-600">
+                <span>{progress.toLocaleString('he-IL')} רשומות נטענו</span>
+                <span>{percentage}%</span>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // KPI Card Component
+      const KPICard = ({ title, value, icon, color, bgColor, loading }) => {
+        const animatedValue = useAnimatedCounter(loading ? 0 : value, 800);
+
+        if (loading) {
+          return <div className="skeleton h-28 rounded-2xl"></div>;
+        }
+
+        return (
+          <div className="kpi-card">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-gray-500 text-sm mb-1">{title}</p>
+                <p className="text-3xl font-bold text-gray-800">
+                  {typeof value === 'string' ? value : animatedValue.toLocaleString('he-IL')}
+                </p>
+              </div>
+              <div className={`w-12 h-12 ${bgColor} rounded-xl flex items-center justify-center`}>
+                <i className={`ph ${icon} text-2xl ${color}`}></i>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // Funnel Chart Component
+      const FunnelChart = ({ data, loading }) => {
+        if (loading) {
+          return <div className="skeleton h-64 rounded-2xl"></div>;
+        }
+
+        const steps = [
+          { label: 'נכנסו לבוט', value: data.totalUsers, color: 'bg-blue-500' },
+          { label: 'אישרו דיוור', value: data.confirmedMailing, color: 'bg-purple-500' },
+          { label: 'קיבלו קישור', value: data.receivedLink, color: 'bg-green-500' },
+        ];
+
+        const maxValue = Math.max(...steps.map(s => s.value), 1);
+
+        return (
+          <div className="chart-container">
+            <h3 className="font-bold text-lg mb-6 text-gray-800">משפך המרה</h3>
+            <div className="space-y-4">
+              {steps.map((step, index) => {
+                const percentage = maxValue > 0 ? (step.value / maxValue) * 100 : 0;
+                const conversionRate = index > 0 && steps[index - 1].value > 0
+                  ? ((step.value / steps[index - 1].value) * 100).toFixed(1)
+                  : null;
+
+                return (
+                  <div key={index}>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-gray-700 font-medium">{step.label}</span>
+                      <span className="font-bold text-gray-800">{step.value.toLocaleString('he-IL')}</span>
+                    </div>
+                    <div className="h-10 bg-gray-100 rounded-lg overflow-hidden">
+                      <div
+                        className={`h-full ${step.color} funnel-bar rounded-lg`}
+                        style={{ width: `${percentage}%` }}
+                      ></div>
+                    </div>
+                    {conversionRate && (
+                      <div className="text-center mt-1">
+                        <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                          {conversionRate}% מהשלב הקודם
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Overall conversion */}
+            <div className="mt-6 pt-4 border-t">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-600">אחוז המרה כולל</span>
+                <span className="text-2xl font-bold text-green-600">
+                  {data.totalUsers > 0
+                    ? ((data.receivedLink / data.totalUsers) * 100).toFixed(1)
+                    : 0}%
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // Chart Wrapper Component
+      const ChartWrapper = ({ title, type, data, options }) => {
+        const canvasRef = useRef(null);
+        const chartRef = useRef(null);
+
+        useEffect(() => {
+          if (!canvasRef.current || !data) return;
+
+          // Destroy existing chart
+          if (chartRef.current) {
+            chartRef.current.destroy();
+          }
+
+          // Create new chart
+          chartRef.current = new Chart(canvasRef.current, {
+            type,
+            data,
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: {
+                  display: false,
+                },
+              },
+              ...options,
+            },
+          });
+
+          return () => {
+            if (chartRef.current) {
+              chartRef.current.destroy();
+            }
+          };
+        }, [data, type, options]);
+
+        return (
+          <div className="chart-container">
+            <h3 className="font-bold text-lg mb-4 text-gray-800">{title}</h3>
+            <div className="h-64">
+              <canvas ref={canvasRef}></canvas>
+            </div>
+          </div>
+        );
+      };
+
+      // Branch Breakdown Table
+      const BranchBreakdown = ({ data, loading }) => {
+        const [sortBy, setSortBy] = useState('users');
+        const [sortDir, setSortDir] = useState('desc');
+
+        if (loading) {
+          return <div className="skeleton h-96 rounded-2xl"></div>;
+        }
+
+        // Calculate branch stats
+        const branchStats = {};
+        data.forEach(user => {
+          const branch = user.branch || 'ללא סניף';
+          if (!branchStats[branch]) {
+            branchStats[branch] = { users: 0, mailing: 0, links: 0 };
+          }
+          branchStats[branch].users++;
+          if (user.confirmedMailing) branchStats[branch].mailing++;
+          if (user.receivedLink) branchStats[branch].links++;
+        });
+
+        // Convert to array and sort
+        let branchArray = Object.entries(branchStats).map(([name, stats]) => ({
+          name,
+          users: stats.users,
+          mailing: stats.mailing,
+          links: stats.links,
+          conversion: stats.users > 0 ? ((stats.links / stats.users) * 100).toFixed(1) : 0,
+        }));
+
+        branchArray.sort((a, b) => {
+          const aVal = sortBy === 'conversion' ? parseFloat(a[sortBy]) : a[sortBy];
+          const bVal = sortBy === 'conversion' ? parseFloat(b[sortBy]) : b[sortBy];
+          return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+        });
+
+        const handleSort = (field) => {
+          if (sortBy === field) {
+            setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+          } else {
+            setSortBy(field);
+            setSortDir('desc');
+          }
+        };
+
+        const SortIcon = ({ field }) => {
+          if (sortBy !== field) return <i className="ph ph-arrows-down-up text-gray-400"></i>;
+          return sortDir === 'asc'
+            ? <i className="ph ph-arrow-up text-blue-600"></i>
+            : <i className="ph ph-arrow-down text-blue-600"></i>;
+        };
+
+        return (
+          <div className="chart-container">
+            <h3 className="font-bold text-lg mb-4 text-gray-800">פילוח לפי סניף</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full data-table">
+                <thead>
+                  <tr className="text-right border-b">
+                    <th className="p-3 font-medium text-gray-600">סניף</th>
+                    <th
+                      className="p-3 font-medium text-gray-600 cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleSort('users')}
+                    >
+                      <div className="flex items-center gap-1">משתמשים <SortIcon field="users" /></div>
+                    </th>
+                    <th
+                      className="p-3 font-medium text-gray-600 cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleSort('mailing')}
+                    >
+                      <div className="flex items-center gap-1">אישרו דיוור <SortIcon field="mailing" /></div>
+                    </th>
+                    <th
+                      className="p-3 font-medium text-gray-600 cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleSort('links')}
+                    >
+                      <div className="flex items-center gap-1">קיבלו קישור <SortIcon field="links" /></div>
+                    </th>
+                    <th
+                      className="p-3 font-medium text-gray-600 cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleSort('conversion')}
+                    >
+                      <div className="flex items-center gap-1">% המרה <SortIcon field="conversion" /></div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {branchArray.map((branch, index) => (
+                    <tr key={index} className="border-b hover:bg-gray-50">
+                      <td className="p-3 font-medium">{branch.name}</td>
+                      <td className="p-3">{branch.users.toLocaleString('he-IL')}</td>
+                      <td className="p-3">{branch.mailing.toLocaleString('he-IL')}</td>
+                      <td className="p-3">{branch.links.toLocaleString('he-IL')}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-1 rounded-full text-sm font-medium ${
+                          parseFloat(branch.conversion) >= 50 ? 'bg-green-100 text-green-700' :
+                          parseFloat(branch.conversion) >= 25 ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-red-100 text-red-700'
+                        }`}>
+                          {branch.conversion}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      };
+
+      // Users Table Component
+      const UsersTable = ({ data, loading, onExportCSV }) => {
+        const [search, setSearch] = useState('');
+        const [filterBranch, setFilterBranch] = useState('');
+        const [sortBy, setSortBy] = useState('created');
+        const [sortDir, setSortDir] = useState('desc');
+        const [page, setPage] = useState(1);
+        const perPage = 50;
+
+        const debouncedSearch = useDebounce(search, 300);
+
+        if (loading) {
+          return <div className="skeleton h-96 rounded-2xl"></div>;
+        }
+
+        // Get unique branches
+        const branches = [...new Set(data.map(u => u.branch).filter(Boolean))].sort();
+
+        // Filter data
+        let filtered = data.filter(user => {
+          const matchesSearch = !debouncedSearch ||
+            (user.name && user.name.toLowerCase().includes(debouncedSearch.toLowerCase())) ||
+            (user.phone && user.phone.includes(debouncedSearch));
+          const matchesBranch = !filterBranch || user.branch === filterBranch;
+          return matchesSearch && matchesBranch;
+        });
+
+        // Sort data
+        filtered.sort((a, b) => {
+          let aVal = a[sortBy];
+          let bVal = b[sortBy];
+          if (sortBy === 'created') {
+            aVal = aVal ? new Date(aVal).getTime() : 0;
+            bVal = bVal ? new Date(bVal).getTime() : 0;
+          }
+          if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+          if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+          if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+          if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+          return 0;
+        });
+
+        // Paginate
+        const totalPages = Math.ceil(filtered.length / perPage);
+        const paginated = filtered.slice((page - 1) * perPage, page * perPage);
+
+        const handleSort = (field) => {
+          if (sortBy === field) {
+            setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+          } else {
+            setSortBy(field);
+            setSortDir('desc');
+          }
+        };
+
+        const formatDate = (dateStr) => {
+          if (!dateStr) return '-';
+          const date = new Date(dateStr);
+          return date.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        };
+
+        const SortIcon = ({ field }) => {
+          if (sortBy !== field) return <i className="ph ph-arrows-down-up text-gray-400"></i>;
+          return sortDir === 'asc'
+            ? <i className="ph ph-arrow-up text-blue-600"></i>
+            : <i className="ph ph-arrow-down text-blue-600"></i>;
+        };
+
+        return (
+          <div className="chart-container">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+              <h3 className="font-bold text-lg text-gray-800">טבלת משתמשים</h3>
+              <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                <div className="relative flex-1 md:flex-initial">
+                  <i className="ph ph-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                  <input
+                    type="text"
+                    placeholder="חיפוש שם או טלפון..."
+                    value={search}
+                    onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                    className="pr-10 pl-4 py-2 border rounded-lg w-full md:w-64 text-sm"
+                  />
+                </div>
+                <select
+                  value={filterBranch}
+                  onChange={(e) => { setFilterBranch(e.target.value); setPage(1); }}
+                  className="px-4 py-2 border rounded-lg text-sm"
+                >
+                  <option value="">כל הסניפים</option>
+                  {branches.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+                <button
+                  onClick={() => onExportCSV(filtered)}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 flex items-center gap-2"
+                >
+                  <i className="ph ph-file-csv"></i>
+                  ייצוא CSV
+                </button>
+              </div>
+            </div>
+
+            <div className="text-sm text-gray-500 mb-2">
+              מציג {paginated.length} מתוך {filtered.length.toLocaleString('he-IL')} משתמשים
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full data-table text-sm">
+                <thead>
+                  <tr className="text-right border-b bg-gray-50">
+                    <th className="p-3 font-medium text-gray-600 cursor-pointer" onClick={() => handleSort('name')}>
+                      <div className="flex items-center gap-1">שם <SortIcon field="name" /></div>
+                    </th>
+                    <th className="p-3 font-medium text-gray-600 cursor-pointer" onClick={() => handleSort('phone')}>
+                      <div className="flex items-center gap-1">טלפון <SortIcon field="phone" /></div>
+                    </th>
+                    <th className="p-3 font-medium text-gray-600 cursor-pointer" onClick={() => handleSort('created')}>
+                      <div className="flex items-center gap-1">תאריך <SortIcon field="created" /></div>
+                    </th>
+                    <th className="p-3 font-medium text-gray-600 cursor-pointer" onClick={() => handleSort('branch')}>
+                      <div className="flex items-center gap-1">סניף <SortIcon field="branch" /></div>
+                    </th>
+                    <th className="p-3 font-medium text-gray-600">אישר דיוור</th>
+                    <th className="p-3 font-medium text-gray-600">קיבל קישור</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated.map((user, index) => (
+                    <tr key={user.id || index} className="border-b hover:bg-gray-50">
+                      <td className="p-3">{user.name || '-'}</td>
+                      <td className="p-3 font-mono text-xs">{user.phone || '-'}</td>
+                      <td className="p-3">{formatDate(user.created)}</td>
+                      <td className="p-3">{user.branch || '-'}</td>
+                      <td className="p-3">
+                        {user.confirmedMailing
+                          ? <i className="ph-fill ph-check-circle text-green-500 text-lg"></i>
+                          : <i className="ph ph-x-circle text-gray-300 text-lg"></i>}
+                      </td>
+                      <td className="p-3">
+                        {user.receivedLink
+                          ? <i className="ph-fill ph-check-circle text-green-500 text-lg"></i>
+                          : <i className="ph ph-x-circle text-gray-300 text-lg"></i>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex justify-center items-center gap-2 mt-4">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-3 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-50"
+                >
+                  <i className="ph ph-caret-right"></i>
+                </button>
+                <span className="text-sm text-gray-600">
+                  עמוד {page} מתוך {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="px-3 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-50"
+                >
+                  <i className="ph ph-caret-left"></i>
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      // Main Analytics Dashboard Component
+      const AnalyticsDashboard = () => {
+        const [data, setData] = useState(null);
+        const [loading, setLoading] = useState(true);
+        const [loadingProgress, setLoadingProgress] = useState({ current: 0, estimated: 0 });
+        const [error, setError] = useState(null);
+        const [dateRange, setDateRange] = useState({ from: '', to: '' });
+        const [filterBranch, setFilterBranch] = useState('');
+        const { addToast } = useToast();
+
+        const loadData = async () => {
+          setLoading(true);
+          setError(null);
+
+          // Simulate progress updates
+          const progressInterval = setInterval(() => {
+            setLoadingProgress(prev => ({
+              current: Math.min(prev.current + Math.random() * 50, prev.estimated - 10),
+              estimated: prev.estimated || 1000
+            }));
+          }, 200);
+
+          try {
+            const result = await api.get('analytics/data');
+            clearInterval(progressInterval);
+
+            if (result.error) {
+              throw new Error(result.error);
+            }
+
+            setData(result.data);
+            setLoadingProgress({ current: result.meta.botUsers, estimated: result.meta.botUsers });
+            addToast(`נטענו ${result.meta.botUsers.toLocaleString('he-IL')} משתמשים`, 'success');
+          } catch (e) {
+            clearInterval(progressInterval);
+            setError(e.message);
+            addToast('שגיאה בטעינת נתונים: ' + e.message, 'error');
+          } finally {
+            setTimeout(() => setLoading(false), 500);
+          }
+        };
+
+        useEffect(() => {
+          loadData();
+        }, []);
+
+        // Filter data by date range and branch
+        const filteredData = React.useMemo(() => {
+          if (!data) return [];
+
+          return data.filter(user => {
+            // Date filter
+            if (dateRange.from || dateRange.to) {
+              const userDate = user.created ? new Date(user.created) : null;
+              if (!userDate) return false;
+
+              if (dateRange.from && userDate < new Date(dateRange.from)) return false;
+              if (dateRange.to && userDate > new Date(dateRange.to + 'T23:59:59')) return false;
+            }
+
+            // Branch filter
+            if (filterBranch && user.branch !== filterBranch) return false;
+
+            return true;
+          });
+        }, [data, dateRange, filterBranch]);
+
+        // Calculate KPIs
+        const kpis = React.useMemo(() => {
+          if (!filteredData.length) return null;
+
+          const today = new Date().toDateString();
+          const last7Days = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+          return {
+            totalUsers: filteredData.length,
+            newUsers: filteredData.filter(u => u.created && new Date(u.created) >= last7Days).length,
+            activeToday: filteredData.filter(u => {
+              const lastMsg = u.lastMessage ? new Date(u.lastMessage).toDateString() : null;
+              return lastMsg === today;
+            }).length,
+            confirmedMailing: filteredData.filter(u => u.confirmedMailing).length,
+            receivedLink: filteredData.filter(u => u.receivedLink).length,
+            conversionRate: filteredData.length > 0
+              ? ((filteredData.filter(u => u.receivedLink).length / filteredData.length) * 100).toFixed(1) + '%'
+              : '0%',
+          };
+        }, [filteredData]);
+
+        // Chart data: Users over time
+        const usersOverTimeData = React.useMemo(() => {
+          if (!filteredData.length) return null;
+
+          const dailyCounts = {};
+          filteredData.forEach(user => {
+            if (user.created) {
+              const date = user.created.split('T')[0];
+              dailyCounts[date] = (dailyCounts[date] || 0) + 1;
+            }
+          });
+
+          const sortedDates = Object.keys(dailyCounts).sort();
+          const last30 = sortedDates.slice(-30);
+
+          return {
+            labels: last30.map(d => {
+              const date = new Date(d);
+              return date.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' });
+            }),
+            datasets: [{
+              label: 'משתמשים חדשים',
+              data: last30.map(d => dailyCounts[d]),
+              borderColor: '#3b82f6',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              fill: true,
+              tension: 0.4,
+            }]
+          };
+        }, [filteredData]);
+
+        // Chart data: Activity by hour
+        const activityByHourData = React.useMemo(() => {
+          if (!filteredData.length) return null;
+
+          const hourCounts = Array(24).fill(0);
+          filteredData.forEach(user => {
+            const dateStr = user.lastMessage || user.lastRegister || user.created;
+            if (dateStr) {
+              const hour = new Date(dateStr).getHours();
+              hourCounts[hour]++;
+            }
+          });
+
+          return {
+            labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
+            datasets: [{
+              label: 'פעילות',
+              data: hourCounts,
+              backgroundColor: '#8b5cf6',
+              borderRadius: 4,
+            }]
+          };
+        }, [filteredData]);
+
+        // Chart data: Activity by day
+        const activityByDayData = React.useMemo(() => {
+          if (!filteredData.length) return null;
+
+          const dayNames = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+          const dayCounts = Array(7).fill(0);
+
+          filteredData.forEach(user => {
+            const dateStr = user.lastMessage || user.lastRegister || user.created;
+            if (dateStr) {
+              const day = new Date(dateStr).getDay();
+              dayCounts[day]++;
+            }
+          });
+
+          return {
+            labels: dayNames,
+            datasets: [{
+              label: 'פעילות',
+              data: dayCounts,
+              backgroundColor: '#10b981',
+              borderRadius: 4,
+            }]
+          };
+        }, [filteredData]);
+
+        // Get unique branches for filter
+        const branches = React.useMemo(() => {
+          if (!data) return [];
+          return [...new Set(data.map(u => u.branch).filter(Boolean))].sort();
+        }, [data]);
+
+        // Export to CSV
+        const exportToCSV = (exportData) => {
+          const headers = ['שם', 'טלפון', 'תאריך הצטרפות', 'סניף', 'אישר דיוור', 'קיבל קישור'];
+          const rows = exportData.map(user => [
+            user.name || '',
+            user.phone || '',
+            user.created ? new Date(user.created).toLocaleDateString('he-IL') : '',
+            user.branch || '',
+            user.confirmedMailing ? 'כן' : 'לא',
+            user.receivedLink ? 'כן' : 'לא',
+          ]);
+
+          const csvContent = [headers, ...rows]
+            .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+            .join('\n');
+
+          // Add BOM for Hebrew support
+          const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `sapir-bot-users-${new Date().toISOString().split('T')[0]}.csv`;
+          link.click();
+          URL.revokeObjectURL(url);
+
+          addToast(`יוצאו ${exportData.length} רשומות`, 'success');
+        };
+
+        if (error) {
+          return (
+            <div className="p-4 md:p-8 pt-16 md:pt-8">
+              <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+                <i className="ph ph-warning-circle text-4xl text-red-500 mb-4"></i>
+                <h3 className="text-lg font-bold text-red-700 mb-2">שגיאה בטעינת הנתונים</h3>
+                <p className="text-red-600 mb-4">{error}</p>
+                <button
+                  onClick={loadData}
+                  className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                >
+                  נסה שוב
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="p-4 md:p-8 pt-16 md:pt-8">
+            {loading && (
+              <AnalyticsLoadingOverlay
+                progress={loadingProgress.current}
+                estimatedTotal={loadingProgress.estimated}
+              />
+            )}
+
+            {/* Header */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-800">דשבורד סטטיסטיקות</h1>
+                <p className="text-gray-500 text-sm">סופר ספיר בוט</p>
+              </div>
+
+              {/* Global Filters */}
+              <div className="flex flex-wrap gap-2 items-center">
+                <div className="flex items-center gap-2 bg-white border rounded-lg px-3 py-2">
+                  <label className="text-sm text-gray-600">מתאריך:</label>
+                  <input
+                    type="date"
+                    value={dateRange.from}
+                    onChange={(e) => setDateRange(prev => ({ ...prev, from: e.target.value }))}
+                    className="text-sm border-0 outline-none"
+                  />
+                </div>
+                <div className="flex items-center gap-2 bg-white border rounded-lg px-3 py-2">
+                  <label className="text-sm text-gray-600">עד תאריך:</label>
+                  <input
+                    type="date"
+                    value={dateRange.to}
+                    onChange={(e) => setDateRange(prev => ({ ...prev, to: e.target.value }))}
+                    className="text-sm border-0 outline-none"
+                  />
+                </div>
+                <select
+                  value={filterBranch}
+                  onChange={(e) => setFilterBranch(e.target.value)}
+                  className="px-3 py-2 border rounded-lg text-sm bg-white"
+                >
+                  <option value="">כל הסניפים</option>
+                  {branches.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+                <button
+                  onClick={loadData}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2"
+                >
+                  <i className="ph ph-arrows-clockwise"></i>
+                  רענון
+                </button>
+              </div>
+            </div>
+
+            {/* KPI Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+              <KPICard
+                title="סה״כ משתמשים"
+                value={kpis?.totalUsers}
+                icon="ph-users"
+                color="text-blue-600"
+                bgColor="bg-blue-100"
+                loading={!kpis}
+              />
+              <KPICard
+                title="חדשים (7 ימים)"
+                value={kpis?.newUsers}
+                icon="ph-user-plus"
+                color="text-green-600"
+                bgColor="bg-green-100"
+                loading={!kpis}
+              />
+              <KPICard
+                title="פעילים היום"
+                value={kpis?.activeToday}
+                icon="ph-lightning"
+                color="text-yellow-600"
+                bgColor="bg-yellow-100"
+                loading={!kpis}
+              />
+              <KPICard
+                title="אישרו דיוור"
+                value={kpis?.confirmedMailing}
+                icon="ph-envelope"
+                color="text-purple-600"
+                bgColor="bg-purple-100"
+                loading={!kpis}
+              />
+              <KPICard
+                title="קיבלו קישור"
+                value={kpis?.receivedLink}
+                icon="ph-link"
+                color="text-cyan-600"
+                bgColor="bg-cyan-100"
+                loading={!kpis}
+              />
+              <KPICard
+                title="אחוז המרה"
+                value={kpis?.conversionRate}
+                icon="ph-chart-line-up"
+                color="text-emerald-600"
+                bgColor="bg-emerald-100"
+                loading={!kpis}
+              />
+            </div>
+
+            {/* Funnel + Charts Row */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              <FunnelChart
+                data={{
+                  totalUsers: kpis?.totalUsers || 0,
+                  confirmedMailing: kpis?.confirmedMailing || 0,
+                  receivedLink: kpis?.receivedLink || 0,
+                }}
+                loading={!kpis}
+              />
+              {usersOverTimeData && (
+                <ChartWrapper
+                  title="משתמשים חדשים לאורך זמן"
+                  type="line"
+                  data={usersOverTimeData}
+                  options={{
+                    scales: {
+                      y: { beginAtZero: true }
+                    }
+                  }}
+                />
+              )}
+            </div>
+
+            {/* Activity Charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              {activityByHourData && (
+                <ChartWrapper
+                  title="פעילות לפי שעה"
+                  type="bar"
+                  data={activityByHourData}
+                  options={{
+                    scales: {
+                      y: { beginAtZero: true }
+                    }
+                  }}
+                />
+              )}
+              {activityByDayData && (
+                <ChartWrapper
+                  title="פעילות לפי יום בשבוע"
+                  type="bar"
+                  data={activityByDayData}
+                  options={{
+                    scales: {
+                      y: { beginAtZero: true }
+                    }
+                  }}
+                />
+              )}
+            </div>
+
+            {/* Branch Breakdown */}
+            <div className="mb-6">
+              <BranchBreakdown data={filteredData} loading={!data} />
+            </div>
+
+            {/* Users Table */}
+            <div>
+              <UsersTable
+                data={filteredData}
+                loading={!data}
+                onExportCSV={exportToCSV}
+              />
+            </div>
+          </div>
+        );
+      };
+
       // --- האפליקציה הראשית ---
       const AppContent = () => {
         const [view, setView] = useState("hours");
@@ -1351,20 +2304,17 @@
               </button>
 
               <div className="text-xs font-bold text-gray-400 px-2 mb-1 mt-6">
-                קישורים
+                ניתוח נתונים
               </div>
-              <a
-                href="https://airtable.com/appNvxRTapf0u3L2d/shrHZmuTIcVQcVt1D"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-right transition text-gray-600 hover:bg-indigo-50 hover:text-indigo-700"
+              <button
+                onClick={() => handleNavClick("analytics")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-right transition ${view === "analytics" ? "bg-indigo-50 text-indigo-700 font-bold shadow-sm ring-1 ring-indigo-200" : "text-gray-600 hover:bg-gray-50"}`}
               >
-                <i className="ph ph-chart-bar text-xl"></i> סטטיסטיקות בוט{" "}
-                <i className="ph ph-arrow-square-out text-sm mr-auto"></i>
-              </a>
+                <i className="ph ph-chart-bar text-xl"></i> דשבורד סטטיסטיקות
+              </button>
             </nav>
             <div className="p-4 border-t text-center text-xs text-gray-400">
-              V3.4
+              V3.5
             </div>
           </>
         );
@@ -1668,6 +2618,9 @@
                   type="info"
                   initialText={data.general}
                 />
+              )}
+              {view === "analytics" && (
+                <AnalyticsDashboard />
               )}
             </main>
           </div>
